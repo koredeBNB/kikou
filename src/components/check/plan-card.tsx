@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { INTENT_LABELS } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
 import { MODEL_IDS, MODEL_LABELS, type Brief, type ModelId, type Question } from "@/lib/sov/types";
 import { cn } from "@/lib/utils";
@@ -14,16 +15,6 @@ export interface PlannedQuestion {
   question: Question;
   enabled: boolean;
 }
-
-const INTENT_LABELS: Record<Question["intent"], string> = {
-  "best-for": "Best for you",
-  "top-list": "Top picks",
-  alternatives: "Alternatives",
-  budget: "Budget",
-  switching: "Switching",
-  features: "Features",
-  custom: "Your question",
-};
 
 export function PlanCard({
   brief,

@@ -18,8 +18,8 @@ export interface StoredRun {
   elapsedMs: number;
 }
 
-const INDEX_KEY = "meadowlark:runs";
-const runKey = (id: string) => `meadowlark:run:${id}`;
+export const INDEX_KEY = "meadowlark:runs";
+export const runKey = (id: string) => `meadowlark:run:${id}`;
 const MAX_RUNS = 12;
 
 export function saveRun(run: StoredRun): void {
