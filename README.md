@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Meadowlark: AI search share-of-voice checker
 
-## Getting Started
+Meadowlark shows whether AI assistants recommend your product. Tell Pip (the meadowlark who runs the checks) your product, category, audience and rivals. Pip asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and then builds a report:
 
-First, run the development server:
+- **Share of voice**, overall and for each assistant
+- **Ranking**: average position, mention rate and first-place answers
+- **Cited sources**: which domains the assistants trust, including your site and rivals' sites
+- **Assistant by assistant**: how each one treats you and who it favours
+- **Prompt by prompt**: every question and answer, with the full text one click away
+- **Next steps**: rule-based recommendations, plus sentiment, competitor gaps and the prompts you're missing from
+
+It works with no API keys. Any assistant without a key answers with realistic demo text and fictional rivals, so you can try the whole flow straight away. Add keys to ask the real assistants.
+
+## Run it locally
+
+Requires Node.js 20+ and [pnpm](https://pnpm.io).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:47321](http://localhost:47321). The sample report lives at [/report/demo](http://localhost:47321/report/demo).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Connect real assistants
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.example` to `.env.local` and add any keys you have, then restart `pnpm dev`. Each assistant switches to live answers on its own. The rest stay in demo mode, and the report labels which is which.
 
-## Learn More
+| Assistant  | Key                                    | Optional settings                                         |
+| ---------- | -------------------------------------- | --------------------------------------------------------- |
+| ChatGPT    | `OPENAI_API_KEY`                       | `OPENAI_MODEL` (default `gpt-4.1-mini`), `OPENAI_WEB_SEARCH` |
+| Claude     | `ANTHROPIC_API_KEY`                    | `ANTHROPIC_MODEL` (default `claude-haiku-4-5`), `ANTHROPIC_WEB_SEARCH` |
+| Gemini     | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | `GEMINI_MODEL` (default `gemini-2.5-flash`), `GEMINI_WEB_SEARCH` |
+| Perplexity | `PERPLEXITY_API_KEY`                   | `PERPLEXITY_MODEL` (default `sonar`)                      |
 
-To learn more about Next.js, take a look at the following resources:
+Web search is off by default for ChatGPT, Claude and Gemini, and Perplexity always searches. Turning it on gets you cited sources, but costs more per check. OpenAI web search needs a search model such as `gpt-4o-mini-search-preview`. Set `SOV_FORCE_MOCK=true` to ignore all keys.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Keys stay on the server. The browser only learns whether each assistant is live, and which model it uses.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## How the scoring works
 
-## Deploy on Vercel
+The scoring is deliberately simple so you can explain it to your team. It lives in `src/lib/sov/` and is covered by unit tests.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Questions** are unbranded ("What's the best CRM for small agencies?"), so every mention is earned. A brand named in a question isn't credited for that answer.
+- **Mentions** are matched on word boundaries, with sensible aliases ("Acme CRM" also matches "Acme").
+- **Rank** is the order in which brands are first named in an answer. Average position only counts answers that mention the brand.
+- **Mention rate** is answers mentioning the brand divided by all answers.
+- **Share of voice** is a brand's mentions divided by all brand mentions, overall or within one assistant's answers.
+- **Rivals** are the competitors you list, plus any brand that appears as a list item in at least two answers.
+- **Sources** are the provider's citations plus links written into the answer, deduplicated per answer and grouped by domain.
+- **Sentiment** is a light word list around each mention with negation handling. It's a direction, not a verdict.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Project layout
+
+```
+src/
+  app/
+    page.tsx                 Chat intake (the landing page)
+    report/[id]/page.tsx     Dashboard (/report/demo is the sample)
+    api/check/route.ts       Runs a check and streams NDJSON events
+    api/providers/route.ts   Which assistants are live or demo
+  components/
+    check/                   Chat: composer, messages, plan, live run and summary cards
+    report/                  Dashboard cards and layout
+    answer/                  Full-answer dialog with highlighted mentions
+    art/                     Original artwork: Pip, clouds, sky scene, assistant glyphs
+    ui/                      shadcn/ui primitives, restyled
+  lib/
+    sov/                     Scoring, question generation, mock answers, run engine
+    providers/               Provider config and live API adapters (plain fetch)
+```
+
+Runs are saved in the browser's `localStorage` (the 12 most recent). There's no database or account.
+
+## Scripts
+
+| Command          | What it does                       |
+| ---------------- | ---------------------------------- |
+| `pnpm dev`       | Dev server on port 47321           |
+| `pnpm build`     | Production build                   |
+| `pnpm start`     | Serve the production build on 47321 |
+| `pnpm test`      | Unit tests (Vitest)                |
+| `pnpm lint`      | ESLint                             |
+| `pnpm typecheck` | TypeScript, no emit                |
+
+## Notes
+
+- Built with Next.js 16 (App Router, Cache Components), React 19, Tailwind CSS v4, shadcn/ui, Motion and Recharts.
+- All artwork is original. The assistant glyphs are simple shapes, not the vendors' logos.
+- AI answers vary from run to run. Treat one check as a snapshot, and re-run it to spot trends.
