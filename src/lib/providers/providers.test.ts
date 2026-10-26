@@ -41,6 +41,46 @@ describe("resolveProviders", () => {
     expect(providers.chatgpt.live).toBe(false);
   });
 
+  it("runs every assistant through OpenRouter when only an OpenRouter key is set", () => {
+    const providers = resolveProviders({ OPENROUTER_API_KEY: "or-test" });
+    expect(providers).toEqual({
+      chatgpt: { live: true, via: "openrouter", apiKey: "or-test", modelName: "openai/gpt-6-luna", webSearch: false, baseUrl: "https://openrouter.ai/api/v1" },
+      claude: { live: true, via: "openrouter", apiKey: "or-test", modelName: "anthropic/claude-haiku-5.5", webSearch: false, baseUrl: "https://openrouter.ai/api/v1" },
+      gemini: { live: true, via: "openrouter", apiKey: "or-test", modelName: "google/gemini-3.1-flash-lite", webSearch: false, baseUrl: "https://openrouter.ai/api/v1" },
+      perplexity: { live: true, via: "openrouter", apiKey: "or-test", modelName: "perplexity/sonar", webSearch: true, baseUrl: "https://openrouter.ai/api/v1" },
+    });
+  });
+
+  it("prefers a direct key, and lets each OpenRouter model and web search be overridden", () => {
+    const providers = resolveProviders({
+      OPENROUTER_API_KEY: "or-test",
+      OPENAI_API_KEY: "sk-test",
+      OPENROUTER_CLAUDE_MODEL: "anthropic/claude-sonnet-5.5",
+      GEMINI_WEB_SEARCH: "true",
+    });
+    expect(providers.chatgpt).toEqual({ live: true, apiKey: "sk-test", modelName: "gpt-4.1-mini", webSearch: false });
+    expect(providers.claude).toMatchObject({ via: "openrouter", modelName: "anthropic/claude-sonnet-5.5" });
+    expect(providers.gemini).toMatchObject({ via: "openrouter", webSearch: true });
+  });
+
+  it("keeps mock mode when forced, even with an OpenRouter key", () => {
+    const providers = resolveProviders({ OPENROUTER_API_KEY: "or-test", SOV_FORCE_MOCK: "true" });
+    expect(Object.values(providers).every((p) => !p.live)).toBe(true);
+  });
+
+  it("says when an assistant runs through OpenRouter", () => {
+    const status = providerStatus({ OPENROUTER_API_KEY: "or-secret", PERPLEXITY_API_KEY: "p-test" });
+    expect(status.find((s) => s.id === "claude")).toEqual({
+      id: "claude",
+      label: "Claude",
+      source: "live",
+      modelName: "anthropic/claude-haiku-5.5",
+      via: "openrouter",
+    });
+    expect(status.find((s) => s.id === "perplexity")).toEqual({ id: "perplexity", label: "Perplexity", source: "live", modelName: "sonar" });
+    expect(JSON.stringify(status)).not.toContain("or-secret");
+  });
+
   it("reports status without exposing keys", () => {
     const status = providerStatus({ OPENAI_API_KEY: "sk-secret" });
     expect(status.find((s) => s.id === "chatgpt")).toEqual({
@@ -152,6 +192,68 @@ describe("askLive", () => {
     });
     const result = await askLive("perplexity", "q", { live: true, apiKey: "p", modelName: "sonar", webSearch: true }, impl);
     expect(result.citations).toEqual(["https://g2.com/y"]);
+  });
+
+  const viaOpenRouter = (modelName: string, webSearch = false) =>
+    ({ live: true, via: "openrouter", apiKey: "or-test", modelName, webSearch, baseUrl: "https://openrouter.ai/api/v1" }) as const;
+
+  it("calls OpenRouter's chat completions and reads URL annotations", async () => {
+    const { impl, calls } = fakeFetch({
+      choices: [
+        {
+          message: {
+            content: "Try **Acme**.",
+            annotations: [
+              { type: "url_citation", url_citation: { url: "https://g2.com/x", title: "G2" } },
+              { type: "url_citation", url_citation: { url: "https://g2.com/x", title: "G2" } },
+              { type: "url_citation", url_citation: { url: "https://capterra.com/y" } },
+            ],
+          },
+        },
+      ],
+    });
+    const result = await askLive("chatgpt", "Best CRM?", viaOpenRouter("openai/gpt-6-luna"), impl);
+    expect(result).toEqual({ text: "Try **Acme**.", citations: ["https://g2.com/x", "https://capterra.com/y"] });
+    expect(calls[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(headersOf(calls[0]).get("authorization")).toBe("Bearer or-test");
+    expect(bodyOf(calls[0])).toEqual({ model: "openai/gpt-6-luna", messages: [{ role: "user", content: "Best CRM?" }] });
+  });
+
+  it("turns on OpenRouter web search for assistants that need it", async () => {
+    const { impl, calls } = fakeFetch({ choices: [{ message: { content: "ok" } }] });
+    await askLive("gemini", "q", viaOpenRouter("google/gemini-3.1-flash-lite", true), impl);
+    expect(bodyOf(calls[0]).plugins).toEqual([{ id: "web" }]);
+  });
+
+  it("keeps Perplexity's own citation order through OpenRouter", async () => {
+    const { impl, calls } = fakeFetch({
+      choices: [
+        {
+          message: {
+            content: "Acme [1] and Close [2]",
+            annotations: [{ type: "url_citation", url_citation: { url: "https://b.com/2" } }],
+          },
+        },
+      ],
+      citations: ["https://a.com/1", "https://b.com/2"],
+    });
+    const result = await askLive("perplexity", "q", viaOpenRouter("perplexity/sonar", true), impl);
+    expect(result.citations).toEqual(["https://a.com/1", "https://b.com/2"]);
+    expect(bodyOf(calls[0]).plugins).toBeUndefined();
+
+    const annotated = fakeFetch({
+      choices: [{ message: { content: "Acme [1]", annotations: [{ type: "url_citation", url_citation: { url: "https://a.com/1" } }] } }],
+    });
+    expect((await askLive("perplexity", "q", viaOpenRouter("perplexity/sonar", true), annotated.impl)).citations).toEqual([
+      "https://a.com/1",
+    ]);
+  });
+
+  it("names the assistant, not the key, when OpenRouter fails", async () => {
+    const { impl } = fakeFetch({ error: { message: "Insufficient credits for or-test" } }, 402);
+    const call = () => askLive("claude", "q", viaOpenRouter("anthropic/claude-haiku-5.5"), impl);
+    await expect(call()).rejects.toThrow(/Claude request failed \(402\)/);
+    await expect(call()).rejects.not.toThrow(/or-test/);
   });
 
   it("throws a readable error with the status code and no secrets", async () => {

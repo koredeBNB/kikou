@@ -33,14 +33,16 @@ export function ProviderStack({ providers }: { providers: ProviderStatus[] }) {
           <span className="hidden sm:inline">{label}</span>
         </button>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-64">
+      <TooltipContent side="top" className="max-w-80">
         {providers.map((p) => (
           <div key={p.id} className="flex justify-between gap-4">
             <span>{p.label}</span>
-            <span className="opacity-75">{p.source === "live" ? p.modelName : "demo answers"}</span>
+            <span className="opacity-75">
+              {p.source === "live" ? `${p.modelName}${p.via === "openrouter" ? " via OpenRouter" : ""}` : "demo answers"}
+            </span>
           </div>
         ))}
-        {live < providers.length && <p className="mt-1 opacity-75">Add API keys to switch assistants to live answers.</p>}
+        {live < providers.length && <p className="mt-1 opacity-75">Add API keys, or one OpenRouter key, to switch assistants to live answers.</p>}
       </TooltipContent>
     </Tooltip>
   );

@@ -1,5 +1,5 @@
 import { INTAKE_JSON_SCHEMA } from "@/lib/intake/schema";
-import { truthy, type Env } from "@/lib/providers/config";
+import { OPENROUTER_BASE_URL, truthy, type Env } from "@/lib/providers/config";
 
 export type IntakeProvider = "openrouter" | "openai" | "anthropic" | "gemini";
 
@@ -21,7 +21,6 @@ export type IntakeClient = (
   options?: IntakeCallOptions,
 ) => Promise<unknown>;
 
-export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const MAX_OUTPUT_TOKENS = 400;
 const TOOL_NAME = "record_intake";
 

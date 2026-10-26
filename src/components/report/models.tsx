@@ -48,6 +48,7 @@ function ModelCard({ summary, status, report }: { summary: ModelSummary; status?
           <p className="font-heading text-lg leading-tight font-semibold">{MODEL_LABELS[summary.model]}</p>
           <p className="truncate text-xs text-ink-soft">
             {summary.answers} answers{status?.modelName ? ` · ${status.modelName}` : ""}
+            {status?.via === "openrouter" ? " via OpenRouter" : ""}
           </p>
         </div>
         <Badge variant={summary.source === "live" ? "meadow" : "sun"} className="ml-auto">

@@ -1,4 +1,4 @@
-import type { LiveSetting } from "@/lib/providers/config";
+import { OPENROUTER_BASE_URL, type LiveSetting } from "@/lib/providers/config";
 import { MODEL_LABELS, type ModelId } from "@/lib/sov/types";
 
 export interface LiveResult {
@@ -120,6 +120,36 @@ async function askPerplexity(question: string, s: LiveSetting, f: typeof fetch, 
   return { text: asString(message.content), citations: (listed.length ? listed : fromResults).filter(Boolean) };
 }
 
+const unique = (urls: string[]) => [...new Set(urls.filter(Boolean))];
+
+/** OpenRouter's OpenAI-compatible API. Sources come back as url_citation annotations; Perplexity also lists `citations`. */
+async function askOpenRouter(
+  model: ModelId,
+  question: string,
+  s: LiveSetting,
+  f: typeof fetch,
+  signal?: AbortSignal,
+): Promise<LiveResult> {
+  const body: Json = { model: s.modelName, messages: [{ role: "user", content: question }] };
+  if (s.webSearch && model !== "perplexity") body.plugins = [{ id: "web" }];
+  const data = (await postJson(
+    model,
+    `${s.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`,
+    { authorization: `Bearer ${s.apiKey}`, "x-title": "Meadowlark" },
+    body,
+    f,
+    signal,
+  )) as Json;
+  const message = (asArray(data.choices)[0]?.message ?? {}) as Json;
+  const listed = Array.isArray(data.citations) ? (data.citations as unknown[]).map(asString) : [];
+  const annotated = asArray(message.annotations)
+    .filter((a) => a.type === "url_citation")
+    .map((a) => asString((a.url_citation as Json | undefined)?.url));
+  const fromResults = asArray(data.search_results).map((r) => asString(r.url));
+  const citations = [listed, annotated, fromResults].map(unique).find((urls) => urls.length) ?? [];
+  return { text: asString(message.content), citations };
+}
+
 export async function askLive(
   model: ModelId,
   question: string,
@@ -127,6 +157,7 @@ export async function askLive(
   fetchImpl: typeof fetch = fetch,
   signal?: AbortSignal,
 ): Promise<LiveResult> {
+  if (setting.via === "openrouter") return askOpenRouter(model, question, setting, fetchImpl, signal);
   switch (model) {
     case "chatgpt":
       return askOpenAI(question, setting, fetchImpl, signal);
