@@ -10,7 +10,7 @@ export function Pip({
   mood = "idle",
   className,
   still = false,
-  title = "Pip the meadowlark",
+  title = "Pip, Kioku's guide",
 }: {
   mood?: PipMood;
   className?: string;

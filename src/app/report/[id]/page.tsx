@@ -4,7 +4,7 @@ import { ReportLoading } from "@/components/report/report-states";
 import { ReportView } from "@/components/report/report-view";
 
 export const metadata: Metadata = {
-  title: "Share-of-voice report · Meadowlark",
+  title: "Share-of-voice report",
 };
 
 export default function ReportPage({ params }: PageProps<"/report/[id]">) {

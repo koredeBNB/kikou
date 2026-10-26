@@ -61,6 +61,7 @@ describe("callIntakeModel", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(headersOf(calls[0]).get("authorization")).toBe("Bearer or-key");
+    expect(headersOf(calls[0]).get("x-title")).toBe("Kioku");
     expect(bodyOf(calls[0])).toMatchObject({
       model: "deepseek/deepseek-v4-flash",
       messages: [

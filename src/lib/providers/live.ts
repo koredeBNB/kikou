@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 import { OPENROUTER_BASE_URL, type LiveSetting } from "@/lib/providers/config";
 import { MODEL_LABELS, type ModelId } from "@/lib/sov/types";
 
@@ -137,7 +138,7 @@ async function askOpenRouter(
   const data = (await postJson(
     model,
     `${s.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`,
-    { authorization: `Bearer ${s.apiKey}`, "x-title": "Meadowlark" },
+    { authorization: `Bearer ${s.apiKey}`, "x-title": BRAND_NAME },
     body,
     f,
     signal,

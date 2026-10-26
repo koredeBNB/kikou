@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 import { INTAKE_JSON_SCHEMA } from "@/lib/intake/schema";
 import { OPENROUTER_BASE_URL, truthy, type Env } from "@/lib/providers/config";
 
@@ -98,7 +99,7 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
   switch (setting.provider) {
     case "openrouter": {
       const url = `${setting.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`;
-      const headers = { authorization: `Bearer ${setting.apiKey}`, "x-title": "Meadowlark" };
+      const headers = { authorization: `Bearer ${setting.apiKey}`, "x-title": BRAND_NAME };
       const body = {
         model: setting.model,
         messages,

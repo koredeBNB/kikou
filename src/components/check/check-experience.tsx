@@ -437,7 +437,7 @@ export function CheckExperience() {
               transition={{ delay: 0.16, type: "spring", stiffness: 200, damping: 20 }}
               className="mt-4 text-[2.6rem] leading-[1.05] font-semibold text-balance text-ink sm:text-6xl"
             >
-              Do AI assistants <span className="text-meadow-600">recommend you?</span>
+              Are you in the <span className="text-meadow-600">AI&apos;s memory?</span>
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 12 }}
@@ -445,7 +445,7 @@ export function CheckExperience() {
               transition={{ delay: 0.24 }}
               className="mt-4 max-w-xl text-lg text-balance text-ink-soft"
             >
-              Tell Pip about your product. We&apos;ll ask ChatGPT, Claude, Gemini and Perplexity what your buyers ask, then show how often
+              Tell Pip about your product. Kioku asks ChatGPT, Claude, Gemini and Perplexity what your buyers ask, then shows how often
               you&apos;re recommended, where you rank and which sources they trust.
             </motion.p>
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }} className="mt-7 w-full">

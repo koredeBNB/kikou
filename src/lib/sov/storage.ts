@@ -18,6 +18,7 @@ export interface StoredRun {
   elapsedMs: number;
 }
 
+// The keys predate the rename to Kioku; changing them would orphan every saved report.
 export const INDEX_KEY = "meadowlark:runs";
 export const runKey = (id: string) => `meadowlark:run:${id}`;
 const MAX_RUNS = 12;

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 import type { Env } from "@/lib/providers/config";
 
 export interface CheckCounter {
@@ -11,7 +12,7 @@ export type CheckClaim =
   | { ok: false; limit: number; retryAfterSeconds: number; message: string };
 
 const HOUR_MS = 3_600_000;
-const STORE_KEY = Symbol.for("meadowlark.daily-checks");
+const STORE_KEY = Symbol.for("kioku.daily-checks");
 
 /** The process-wide counter. It lives on globalThis so every route bundle shares it, and resets when the server restarts. */
 export function dailyChecks(): CheckCounter {
@@ -31,7 +32,7 @@ function untilMidnightUtc(now: Date): number {
 }
 
 function limitMessage(limit: number, waitMs: number): string {
-  const used = limit === 1 ? "today's one check" : `all ${limit} checks for today`;
+  const used = limit === 1 ? `today's one ${BRAND_NAME} check` : `all ${limit} ${BRAND_NAME} checks for today`;
   const hours = Math.round(waitMs / HOUR_MS);
   const wait = waitMs < HOUR_MS ? "in under an hour" : hours === 1 ? "in about an hour" : `in about ${hours} hours`;
   return `We've used ${used}, so I can't ask the assistants again just yet. The limit resets at midnight UTC, ${wait}. Your earlier reports are still saved.`;

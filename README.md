@@ -1,6 +1,6 @@
-# Meadowlark: AI search share-of-voice checker
+# Kioku: AI search share-of-voice checker
 
-Meadowlark shows whether AI assistants recommend your product. Tell Pip (the meadowlark who runs the checks) your product, category, audience and rivals. Pip asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and then builds a report:
+**Are you in the AI's memory?** Kioku (Japanese for "memory") shows whether AI assistants recommend your product. Tell Pip (the bird who runs the checks) your product, category, audience and rivals. Pip asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and then builds a report:
 
 - **Share of voice**, overall and for each assistant
 - **Ranking**: average position, mention rate and first-place answers

@@ -239,6 +239,7 @@ describe("askLive", () => {
     expect(result).toEqual({ text: "Try **Acme**.", citations: ["https://g2.com/x", "https://capterra.com/y"] });
     expect(calls[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(headersOf(calls[0]).get("authorization")).toBe("Bearer or-test");
+    expect(headersOf(calls[0]).get("x-title")).toBe("Kioku");
     expect(bodyOf(calls[0])).toEqual({ model: "openai/gpt-6-luna", messages: [{ role: "user", content: "Best CRM?" }] });
   });
 

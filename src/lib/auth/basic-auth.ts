@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { BRAND_NAME } from "@/lib/brand";
 import type { Env } from "@/lib/providers/config";
 
 export interface BasicAuthCredentials {
@@ -6,7 +7,7 @@ export interface BasicAuthCredentials {
   password: string;
 }
 
-const REALM = 'Basic realm="Meadowlark", charset="UTF-8"';
+const REALM = `Basic realm="${BRAND_NAME}", charset="UTF-8"`;
 
 export function basicAuthCredentials(env: Env): BasicAuthCredentials | null {
   const user = env.SOV_BASIC_AUTH_USER?.trim();

@@ -23,7 +23,7 @@ describe("checkBasicAuth", () => {
   it("challenges a request with no credentials", async () => {
     const response = checkBasicAuth(null, env);
     expect(response?.status).toBe(401);
-    expect(response?.headers.get("www-authenticate")).toBe('Basic realm="Meadowlark", charset="UTF-8"');
+    expect(response?.headers.get("www-authenticate")).toBe('Basic realm="Kioku", charset="UTF-8"');
     expect(response?.headers.get("cache-control")).toBe("no-store");
     expect(await response?.text()).not.toContain("s3cret");
   });

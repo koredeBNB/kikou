@@ -1,3 +1,4 @@
+import { BRAND_NAME } from "@/lib/brand";
 import { questionFor } from "@/lib/intake/flow";
 import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/types";
 
@@ -11,7 +12,7 @@ export interface IntakeInput {
   state: IntakeState;
 }
 
-export const INTAKE_SYSTEM_PROMPT = `You read one chat reply for Meadowlark, a tool that checks whether AI assistants recommend a product.
+export const INTAKE_SYSTEM_PROMPT = `You read one chat reply for ${BRAND_NAME}, a tool that checks whether AI assistants recommend a product.
 Pip, its friendly guide, collects a short brief one question at a time, in this order:
 1. product: the product's name
 2. category: what kind of product it is, as a buyer would search for it

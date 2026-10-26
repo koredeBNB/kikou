@@ -27,7 +27,7 @@ describe("claimCheck", () => {
     const refused = claimCheck(env, now, store);
     expect(refused).toMatchObject({ ok: false, limit: 2, retryAfterSeconds: 5 * 3600 });
     expect(refused.ok === false && refused.message).toBe(
-      "We've used all 2 checks for today, so I can't ask the assistants again just yet. The limit resets at midnight UTC, in about 5 hours. Your earlier reports are still saved.",
+      "We've used all 2 Kioku checks for today, so I can't ask the assistants again just yet. The limit resets at midnight UTC, in about 5 hours. Your earlier reports are still saved.",
     );
     expect(store.count).toBe(2);
   });
@@ -46,7 +46,7 @@ describe("claimCheck", () => {
     claimCheck(one, at("2026-10-26T23:30:00Z"), store);
     const refused = claimCheck(one, at("2026-10-26T23:30:00Z"), store);
     expect(refused.ok === false && refused.message).toBe(
-      "We've used today's one check, so I can't ask the assistants again just yet. The limit resets at midnight UTC, in under an hour. Your earlier reports are still saved.",
+      "We've used today's one Kioku check, so I can't ask the assistants again just yet. The limit resets at midnight UTC, in under an hour. Your earlier reports are still saved.",
     );
   });
 

@@ -31,7 +31,7 @@ describe("POST /api/check daily cap", () => {
     expect(Number(second.headers.get("retry-after"))).toBeGreaterThan(0);
     const json = await second.json();
     expect(json.code).toBe("daily-limit");
-    expect(json.error).toMatch(/^We've used today's one check/);
+    expect(json.error).toMatch(/^We've used today's one Kioku check/);
   });
 
   it("doesn't count requests that fail validation", async () => {
