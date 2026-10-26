@@ -2,10 +2,12 @@ import type { IntakeInput } from "@/lib/intake/prompt";
 import { rulesTurn } from "@/lib/intake/rules";
 import { parseIntakeTurn } from "@/lib/intake/schema";
 import { INTAKE_FIELDS, type FallbackReason, type IntakeField, type IntakeResult, type IntakeState } from "@/lib/intake/types";
+import { MAX_QUESTION_COUNT, MAX_TOPICS } from "@/lib/sov/intake";
 
 const MAX_REPLY = 1000;
 const MAX_VALUE = 120;
 const MAX_COMPETITORS = 8;
+const MAX_TOPIC = 40;
 const REASONS: FallbackReason[] = ["no-model", "forced", "timeout", "error", "invalid"];
 /** Longer than the server's longest model timeout, so the server can answer with its own fallback first. */
 export const CLIENT_TIMEOUT_MS = 9000;
@@ -22,12 +24,15 @@ export function validateIntakeRequest(input: unknown): { ok: true; value: Intake
   if (!reply) return { ok: false, error: "Empty reply." };
 
   const raw = (body.state && typeof body.state === "object" ? body.state : {}) as Record<string, unknown>;
+  const count = raw.count;
   const state: IntakeState = {
     product: str(raw.product),
     category: str(raw.category),
     audience: str(raw.audience),
     competitors: Array.isArray(raw.competitors) ? raw.competitors.map((c) => str(c)).filter(Boolean).slice(0, MAX_COMPETITORS) : [],
     website: str(raw.website) || undefined,
+    topics: Array.isArray(raw.topics) ? raw.topics.map((t) => str(t, MAX_TOPIC)).filter(Boolean).slice(0, MAX_TOPICS) : [],
+    count: Number.isInteger(count) && (count as number) >= 1 && (count as number) <= MAX_QUESTION_COUNT ? (count as number) : undefined,
     skipped: fields(raw.skipped),
     nudged: fields(raw.nudged),
   };
@@ -55,7 +60,7 @@ export async function requestIntake(
     if (!response.ok) return rules("error");
     const data = (await response.json()) as { source?: unknown; reason?: unknown; turn?: Record<string, unknown> };
     if (data.source === "ai" && data.turn) {
-      const turn = parseIntakeTurn({ ...data.turn, message: data.turn.message ?? "" }, input.reply);
+      const turn = parseIntakeTurn({ ...data.turn, message: data.turn.message ?? "" }, input.reply, input.field);
       return turn ? { turn, source: "ai" } : rules("invalid");
     }
     return rules(REASONS.includes(data.reason as FallbackReason) ? (data.reason as FallbackReason) : "invalid");

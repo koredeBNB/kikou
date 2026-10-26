@@ -14,6 +14,8 @@ export interface Brief {
   audience: string;
   competitors: string[];
   website?: string;
+  /** Focus areas to split the questions across. None means a broad check. */
+  topics?: string[];
 }
 
 export type QuestionIntent =

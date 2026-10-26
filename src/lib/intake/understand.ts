@@ -49,7 +49,7 @@ export async function understandReply(input: IntakeInput, options: UnderstandOpt
       client(setting, buildIntakePrompt(input), { signal: abort.signal, fetchImpl: options.fetchImpl }),
       timeout,
     ]);
-    const turn = parseIntakeTurn(raw, input.reply);
+    const turn = parseIntakeTurn(raw, input.reply, input.field);
     return turn ? { turn, source: "ai" } : rules("invalid");
   } catch (error) {
     return rules(error instanceof Timeout ? "timeout" : "error");

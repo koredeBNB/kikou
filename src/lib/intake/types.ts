@@ -1,10 +1,10 @@
-export const INTAKE_FIELDS = ["product", "category", "audience", "competitors", "website"] as const;
+export const INTAKE_FIELDS = ["product", "category", "audience", "competitors", "website", "topics", "count"] as const;
 export type IntakeField = (typeof INTAKE_FIELDS)[number];
 /** What Pip asks for next; "review" means every field is answered or skipped and the question plan comes next. */
 export type IntakeNext = IntakeField | "review";
 
 export const REQUIRED_FIELDS: readonly IntakeField[] = ["product", "category"];
-export const OPTIONAL_FIELDS = ["audience", "competitors", "website"] as const;
+export const OPTIONAL_FIELDS = ["audience", "competitors", "website", "topics", "count"] as const;
 export type OptionalField = (typeof OPTIONAL_FIELDS)[number];
 
 export type IntakeIntent = "answer" | "skip" | "unclear";
@@ -15,6 +15,10 @@ export interface IntakeValues {
   audience?: string;
   competitors?: string[];
   website?: string;
+  /** Focus areas to research within the category, e.g. "trading", "RWA". */
+  topics?: string[];
+  /** How many questions to ask each assistant. */
+  count?: number;
 }
 
 /** One understood reply. `intent` is about the field Pip asked for; `values` may fill several fields. */
@@ -29,6 +33,8 @@ export interface IntakeTurn {
   message?: string;
   /** Some of the reply wasn't usable (e.g. "Planta, not sure about the rest"). */
   partial?: boolean;
+  /** The reply asked for more questions than one check allows, so the count was capped. */
+  capped?: boolean;
 }
 
 export interface IntakeState {
@@ -37,6 +43,8 @@ export interface IntakeState {
   audience: string;
   competitors: string[];
   website?: string;
+  topics: string[];
+  count?: number;
   skipped: IntakeField[];
   /** Fields where Pip already asked once for a clearer answer. */
   nudged: IntakeField[];

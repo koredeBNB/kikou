@@ -1,24 +1,104 @@
 import { describe, expect, it } from "vitest";
-import { applyTurn, emptyIntake, nextField, questionFor, toBrief } from "@/lib/intake/flow";
+import { applyTurn, DEFAULT_QUESTION_COUNT, emptyIntake, nextField, questionCount, questionFor, toBrief } from "@/lib/intake/flow";
 import type { IntakeState, OptionalField } from "@/lib/intake/types";
 
 const withState = (patch: Partial<IntakeState>): IntakeState => ({ ...emptyIntake(), ...patch });
 const texts = (lines: { text: string }[]) => lines.map((l) => l.text);
+const brief = { product: "Fernly", category: "plant care app", audience: "new plant parents", competitors: ["Planta"], website: "fernly.app" };
 
 describe("nextField", () => {
-  it("walks product, category, audience, competitors, website, then review", () => {
+  it("walks product, category, audience, competitors, website, topics and count, then review", () => {
     expect(nextField(emptyIntake())).toBe("product");
     expect(nextField(withState({ product: "Fernly" }))).toBe("category");
     expect(nextField(withState({ product: "Fernly", category: "plant care app" }))).toBe("audience");
     expect(nextField(withState({ product: "Fernly", category: "app", audience: "new plant parents" }))).toBe("competitors");
     expect(nextField(withState({ product: "Fernly", category: "app", audience: "a", competitors: ["Planta"] }))).toBe("website");
-    expect(nextField(withState({ product: "Fernly", category: "app", audience: "a", competitors: ["Planta"], website: "fernly.app" }))).toBe(
-      "review",
-    );
+    expect(nextField(withState(brief))).toBe("topics");
+    expect(nextField(withState({ ...brief, topics: ["watering"] }))).toBe("count");
+    expect(nextField(withState({ ...brief, topics: ["watering"], count: 25 }))).toBe("review");
   });
 
   it("treats skipped fields as done", () => {
     expect(nextField(withState({ product: "Fernly", category: "app", skipped: ["audience", "competitors"] }))).toBe("website");
+    expect(nextField(withState({ ...brief, skipped: ["topics", "count"] }))).toBe("review");
+  });
+});
+
+describe("topics and question count", () => {
+  it("confirms research topics from the first message, then asks what the product is", () => {
+    const result = applyTurn(emptyIntake(), "product", { intent: "answer", values: { product: "BNB", topics: ["trading", "RWA", "AI"] } });
+    expect(result.state.topics).toEqual(["trading", "RWA", "AI"]);
+    expect(result.next).toBe("category");
+    expect(texts(result.messages)).toEqual([
+      "Lovely to meet **BNB**! I'll focus on trading, RWA and AI. What kind of product is it? A short category works best, like “CRM” or “plant care app”.",
+    ]);
+  });
+
+  it("asks for focus areas after the website, with examples that suit the category", () => {
+    const state = withState({ product: "Trust Wallet", category: "crypto wallet", audience: "", competitors: [], skipped: ["audience", "competitors"] });
+    const result = applyTurn(state, "website", { intent: "answer", values: { website: "trustwallet.com" } });
+    expect(result.next).toBe("topics");
+    const ask = questionFor("topics", result.state);
+    expect(texts(result.messages).at(-1)).toBe(ask);
+    expect(ask).toMatch(/security/);
+    expect(ask).toMatch(/skip for a broad check/);
+    expect(questionFor("topics", withState({ category: "CRM" }))).not.toMatch(/staking/);
+  });
+
+  it("runs a broad check when topics are skipped, then asks how many questions", () => {
+    const result = applyTurn(withState(brief), "topics", { intent: "skip", values: {} });
+    expect(result.state.skipped).toContain("topics");
+    expect(result.next).toBe("count");
+    expect(texts(result.messages)).toEqual(["No problem, I'll run a broad check across the whole category.", questionFor("count", result.state)]);
+  });
+
+  it("says how it will split the questions across the topics", () => {
+    const result = applyTurn(withState(brief), "topics", { intent: "answer", values: { topics: ["watering", "pest control"] } });
+    expect(texts(result.messages)).toEqual([
+      "Got it. I'll split the questions evenly across watering and pest control.",
+      questionFor("count", result.state),
+    ]);
+  });
+
+  it("asks how many questions last", () => {
+    expect(questionFor("count", withState(brief))).toBe(
+      "Last one: how many questions should I ask each AI? Pick 10, 25, 50 or 100, or any number up to 100.",
+    );
+    expect(questionFor("website", withState(brief))).not.toMatch(/^Last one/);
+  });
+
+  it("takes the count and moves on to the plan", () => {
+    const state = withState({ ...brief, skipped: ["topics"] });
+    const result = applyTurn(state, "count", { intent: "answer", values: { count: 50 } });
+    expect(result.state.count).toBe(50);
+    expect(result.next).toBe("review");
+    expect(texts(result.messages)).toEqual(["Got it, 50 questions for each assistant."]);
+    expect(texts(applyTurn(state, "count", { intent: "answer", values: { count: 1 } }).messages)).toEqual(["Got it, 1 question for each assistant."]);
+  });
+
+  it("says when it capped a big number", () => {
+    const result = applyTurn(withState({ ...brief, skipped: ["topics"] }), "count", { intent: "answer", values: { count: 100 }, capped: true });
+    expect(texts(result.messages)).toEqual(["100 is the most I can ask in one check, so I'll ask 100."]);
+  });
+
+  it("uses 10 questions when the count is skipped or stays unclear", () => {
+    const state = withState({ ...brief, skipped: ["topics"] });
+    const skipped = applyTurn(state, "count", { intent: "skip", values: {} });
+    expect(skipped.next).toBe("review");
+    expect(questionCount(skipped.state)).toBe(DEFAULT_QUESTION_COUNT);
+    expect(DEFAULT_QUESTION_COUNT).toBe(10);
+    expect(texts(skipped.messages)).toEqual(["No problem, I'll ask 10 questions."]);
+
+    const once = applyTurn(state, "count", { intent: "unclear", values: {} });
+    expect(once.next).toBe("count");
+    const twice = applyTurn(once.state, "count", { intent: "unclear", values: {} });
+    expect(twice.next).toBe("review");
+    expect(texts(twice.messages)).toEqual(["I couldn't spot a number there, so I'll ask 10 questions."]);
+  });
+
+  it("puts the topics on the brief", () => {
+    expect(toBrief(withState({ ...brief, topics: ["watering"] })).topics).toEqual(["watering"]);
+    expect(toBrief(withState(brief)).topics).toBeUndefined();
   });
 });
 
@@ -42,7 +122,7 @@ describe("applyTurn", () => {
   });
 
   it("goes straight to review once nothing is missing", () => {
-    const state = withState({ product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app" });
+    const state = withState({ product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app", topics: ["watering"], count: 10 });
     const result = applyTurn(state, "competitors", { intent: "answer", values: { competitors: ["Planta", "Greg"] } });
     expect(result.next).toBe("review");
     expect(texts(result.messages)).toEqual(["Noted. I'll watch Planta and Greg."]);
@@ -139,10 +219,11 @@ describe("applyTurn", () => {
       skips: ["competitors"],
     });
     expect(result.state.skipped).toEqual(["competitors"]);
-    expect(result.next).toBe("review");
+    expect(result.next).toBe("topics");
     expect(texts(result.messages)).toEqual([
       "Lovely: **Fernly**, a plant care app for new plant parents.",
       "No problem, I'll spot your competitors in the answers.",
+      questionFor("topics", result.state),
     ]);
   });
 
@@ -159,7 +240,7 @@ describe("applyTurn", () => {
   });
 
   it("mentions the rest of a partial competitor list", () => {
-    const state = withState({ product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app" });
+    const state = withState({ product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app", skipped: ["topics", "count"] });
     const result = applyTurn(state, "competitors", { intent: "answer", values: { competitors: ["Planta"] }, partial: true });
     expect(texts(result.messages)).toEqual(["Noted. I'll watch Planta and spot any others in the answers."]);
   });

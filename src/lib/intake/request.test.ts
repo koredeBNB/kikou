@@ -20,11 +20,29 @@ describe("validateIntakeRequest", () => {
           audience: "",
           competitors: ["Planta"],
           website: undefined,
+          topics: [],
+          count: undefined,
           skipped: ["audience"],
           nudged: [],
         },
       },
     });
+  });
+
+  it("keeps up to five short topics and a whole-number count from 1 to 100", () => {
+    const parsed = validateIntakeRequest({
+      field: "count",
+      reply: "50",
+      state: { product: "Fernly", topics: ["watering", 3, "x".repeat(200), "a", "b", "c", "d"], count: 25, skipped: ["topics", "count"] },
+    });
+    if (!parsed.ok) throw new Error("expected ok");
+    expect(parsed.value.state.topics).toEqual(["watering", "x".repeat(40), "a", "b", "c"]);
+    expect(parsed.value.state.count).toBe(25);
+    expect(parsed.value.state.skipped).toEqual(["topics", "count"]);
+    for (const count of [0, 101, 2.5, "10"]) {
+      const bad = validateIntakeRequest({ field: "count", reply: "x", state: { count } });
+      expect(bad.ok && bad.value.state.count).toBeUndefined();
+    }
   });
 
   it.each([

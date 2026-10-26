@@ -13,9 +13,43 @@ describe("INTAKE_JSON_SCHEMA", () => {
   it("is a strict schema that requires every key", () => {
     expect(INTAKE_JSON_SCHEMA.additionalProperties).toBe(false);
     expect(INTAKE_JSON_SCHEMA.required).toEqual(["intent", "values", "skips", "asks", "message"]);
-    expect(INTAKE_JSON_SCHEMA.properties.values.required).toEqual(["product", "category", "audience", "competitors", "website"]);
+    expect(INTAKE_JSON_SCHEMA.properties.values.required).toEqual(["product", "category", "audience", "competitors", "website", "topics", "count"]);
     expect(INTAKE_JSON_SCHEMA.properties.intent.enum).toEqual(["answer", "skip", "unclear"]);
-    expect(INTAKE_JSON_SCHEMA.properties.skips.items.enum).toEqual(["audience", "competitors", "website"]);
+    expect(INTAKE_JSON_SCHEMA.properties.skips.items.enum).toEqual(["audience", "competitors", "website", "topics", "count"]);
+  });
+});
+
+describe("parseIntakeTurn topics and count", () => {
+  const blank = { product: null, category: null, audience: null, competitors: null, website: null, topics: null, count: null };
+  const turnWith = (values: Record<string, unknown>, asks = "review") => ({ intent: "answer", values: { ...blank, ...values }, skips: [], asks, message: "Got it." });
+
+  it("keeps only the topics the reply names, up to five", () => {
+    const turn = parseIntakeTurn(
+      turnWith({ product: "BNB", topics: ["trading", "RWA", "AI", "memecoins"] }, "category"),
+      "research BNB's standing within trading, RWA, AI",
+      "product",
+    );
+    expect(turn?.values).toEqual({ product: "BNB", topics: ["trading", "RWA", "AI"] });
+    const many = parseIntakeTurn(turnWith({ topics: ["a1", "b2", "c3", "d4", "e5", "f6"] }), "a1, b2, c3, d4, e5, f6", "topics");
+    expect(many?.values.topics).toHaveLength(5);
+  });
+
+  it("takes a question count when the user is answering how many", () => {
+    expect(parseIntakeTurn(turnWith({ count: 50 }), "about fifty", "count")?.values).toEqual({ count: 50 });
+    expect(parseIntakeTurn(turnWith({ count: 30 }), "Acme with 30 questions please", "product")?.values).toEqual({ count: 30 });
+  });
+
+  it("ignores numbers that aren't about the question count", () => {
+    const turn = parseIntakeTurn(turnWith({ product: "Acme", count: 50 }, "category"), "Acme, for 50-person agencies", "product");
+    expect(turn?.values).toEqual({ product: "Acme" });
+  });
+
+  it("caps the count at 100 and rejects counts without a number in the reply", () => {
+    const capped = parseIntakeTurn(turnWith({ count: 250 }), "250", "count");
+    expect(capped?.values).toEqual({ count: 100 });
+    expect(capped?.capped).toBe(true);
+    expect(parseIntakeTurn(turnWith({ count: 40 }), "whatever works", "count")).toBeNull();
+    expect(parseIntakeTurn(turnWith({ count: 2.5 }), "2.5", "count")).toBeNull();
   });
 });
 

@@ -10,21 +10,36 @@ import {
   type PipLine,
 } from "@/lib/intake/types";
 import { listJoin } from "@/lib/format";
+import { MAX_QUESTION_COUNT } from "@/lib/sov/intake";
 import type { Brief } from "@/lib/sov/types";
 
+export const DEFAULT_QUESTION_COUNT = 10;
+
 export function emptyIntake(): IntakeState {
-  return { product: "", category: "", audience: "", competitors: [], skipped: [], nudged: [] };
+  return { product: "", category: "", audience: "", competitors: [], topics: [], skipped: [], nudged: [] };
 }
 
 function filled(state: IntakeState, field: IntakeField): boolean {
-  if (field === "competitors") return state.competitors.length > 0;
-  if (field === "website") return Boolean(state.website);
-  return Boolean(state[field]);
+  switch (field) {
+    case "competitors":
+      return state.competitors.length > 0;
+    case "topics":
+      return state.topics.length > 0;
+    case "count":
+      return state.count !== undefined;
+    case "website":
+      return Boolean(state.website);
+    default:
+      return Boolean(state[field]);
+  }
 }
 
 export function nextField(state: IntakeState): IntakeNext {
   return INTAKE_FIELDS.find((field) => !filled(state, field) && !state.skipped.includes(field)) ?? "review";
 }
+
+/** Questions per assistant: the user's number, or the default when they skipped it. */
+export const questionCount = (state: IntakeState) => state.count ?? DEFAULT_QUESTION_COUNT;
 
 export function toBrief(state: IntakeState): Brief {
   return {
@@ -33,12 +48,35 @@ export function toBrief(state: IntakeState): Brief {
     audience: state.audience,
     competitors: state.competitors,
     website: state.website,
+    topics: state.topics.length ? [...state.topics] : undefined,
   };
 }
+
+const TOPIC_EXAMPLES: [RegExp, string[]][] = [
+  [/crypto|wallet|exchange|defi|blockchain|token|bitcoin|web3|nft/i, ["security", "staking", "DeFi"]],
+  [/\bcrm\b|sales/i, ["pipeline management", "reporting", "integrations"]],
+  [/analytics|tracking/i, ["privacy", "dashboards", "pricing"]],
+  [/bank|financ|accounting|invoic|payment|budget/i, ["fees", "invoicing", "security"]],
+  [/plant|garden/i, ["watering reminders", "plant ID", "pest control"]],
+  [/project|task|productivity/i, ["collaboration", "time tracking", "integrations"]],
+  [/\bai\b|writing|chatbot/i, ["accuracy", "privacy", "pricing"]],
+  [/shoe|apparel|fashion|clothing/i, ["comfort", "durability", "price"]],
+];
+
+/** Focus areas Pip suggests for a category. */
+export function topicExamples(category: string): string[] {
+  return TOPIC_EXAMPLES.find(([pattern]) => pattern.test(category))?.[1] ?? ["pricing", "ease of use", "integrations"];
+}
+
+const quoted = (items: string[]) => {
+  const parts = items.map((item) => `“${item}”`);
+  return `${parts.slice(0, -1).join(", ")} or ${parts.at(-1)}`;
+};
 
 const withArticle = (noun: string) => `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
 const forAudience = (state: IntakeState) => (state.audience ? ` for ${state.audience}` : "");
 const WHO_FOR = "Who is it for? Describe your typical buyer, or skip if it's for everyone.";
+const questions = (n: number) => `${n} question${n === 1 ? "" : "s"}`;
 
 /** Pip's standard question for a field. */
 export function questionFor(field: IntakeField, state: IntakeState): string {
@@ -52,7 +90,11 @@ export function questionFor(field: IntakeField, state: IntakeState): string {
     case "competitors":
       return "Which competitors should I keep an eye on? List a few, separated by commas, or skip and I'll spot them in the answers.";
     case "website":
-      return "Last one: what's your website? It helps me notice when assistants cite you. No site yet? Just skip.";
+      return "What's your website? It helps me notice when assistants cite you. No site yet? Just skip.";
+    case "topics":
+      return `What should I focus on? Name up to five areas, like ${quoted(topicExamples(state.category))}, and I'll split the questions across them. Or skip for a broad check.`;
+    case "count":
+      return `Last one: how many questions should I ask each AI? Pick 10, 25, 50 or 100, or any number up to ${MAX_QUESTION_COUNT}.`;
   }
 }
 
@@ -70,22 +112,36 @@ const UNCLEAR: Record<IntakeField, string> = {
   competitors:
     "I couldn't pick out any brand names there. Could you list them, like “HubSpot, Pipedrive”? Or skip and I'll spot them in the answers.",
   website: "I couldn't spot a web address in that. Try something like acme.com, or skip.",
+  topics: "Could you list a few focus areas, separated by commas, like “pricing, integrations”? Or skip for a broad check.",
+  count: `How many questions should I ask each AI? Any number from 1 to ${MAX_QUESTION_COUNT} works, like 10, 25, 50 or 100.`,
 };
 
-const SKIPPED: Record<"audience" | "competitors" | "website", { skip: string; gaveUp: string }> = {
+const BROAD = "I'll run a broad check across the whole category.";
+const SKIPPED: Record<OptionalField, { skip: string; gaveUp: string }> = {
   audience: { skip: "No problem, I'll keep the questions general.", gaveUp: "No problem, I'll keep the questions general." },
   competitors: {
     skip: "No problem, I'll spot your competitors in the answers.",
     gaveUp: "I still couldn't pick out any brand names, so I'll spot your competitors in the answers instead.",
   },
   website: { skip: "No problem, we'll go without it.", gaveUp: "No problem, we'll go without it." },
+  topics: { skip: `No problem, ${BROAD}`, gaveUp: `I couldn't pick out any focus areas, so ${BROAD}` },
+  count: {
+    skip: `No problem, I'll ask ${questions(DEFAULT_QUESTION_COUNT)}.`,
+    gaveUp: `I couldn't spot a number there, so I'll ask ${questions(DEFAULT_QUESTION_COUNT)}.`,
+  },
 };
 
 type Outcome =
   | { kind: "filled"; fields: IntakeField[]; declined: OptionalField[] }
   | { kind: "skipped" | "gave-up" | "unclear" | "skip-required" };
 
-function rulesLines(state: IntakeState, field: IntakeField, outcome: Outcome, next: IntakeNext, partial: boolean): PipLine[] {
+function rulesLines(
+  state: IntakeState,
+  field: IntakeField,
+  outcome: Outcome,
+  next: IntakeNext,
+  turn: Pick<IntakeTurn, "partial" | "capped">,
+): PipLine[] {
   const ask = (lines: PipLine[]) => (next === "review" ? lines : [...lines, { text: questionFor(next, state) }]);
   switch (outcome.kind) {
     case "skip-required":
@@ -94,28 +150,47 @@ function rulesLines(state: IntakeState, field: IntakeField, outcome: Outcome, ne
       return [{ text: UNCLEAR[field] }];
     case "skipped":
     case "gave-up": {
-      const copy = SKIPPED[field as keyof typeof SKIPPED];
+      const copy = SKIPPED[field as OptionalField];
       return ask([{ text: outcome.kind === "skipped" ? copy.skip : copy.gaveUp }]);
     }
     case "filled": {
       const lines: PipLine[] = [];
       const { product, category } = state;
+      const gotTopics = outcome.fields.includes("topics");
+      const focus = gotTopics && field !== "topics" ? `I'll focus on ${listJoin(state.topics)}. ` : "";
       if (outcome.fields.includes("product")) {
         if (next === "category") {
-          return [{ text: `Lovely to meet **${product}**! What kind of product is it? A short category works best, like “CRM” or “plant care app”.`, mood: "wave" }];
+          return [
+            {
+              text: `Lovely to meet **${product}**! ${focus}What kind of product is it? A short category works best, like “CRM” or “plant care app”.`,
+              mood: "wave",
+            },
+          ];
         }
-        if (next === "audience") return [{ text: `**${product}**, ${withArticle(category)}. Lovely! ${WHO_FOR}`, mood: "wave" }];
+        if (next === "audience") return [{ text: `**${product}**, ${withArticle(category)}. Lovely! ${focus}${WHO_FOR}`, mood: "wave" }];
         lines.push({ text: `Lovely: **${product}**, ${withArticle(category)}${forAudience(state)}.`, mood: "happy" });
       } else if (outcome.fields.includes("category")) {
-        if (next === "audience") return [{ text: `Got it, ${withArticle(category)}. ${WHO_FOR}`, mood: "wave" }];
+        if (next === "audience") return [{ text: `Got it, ${withArticle(category)}. ${focus}${WHO_FOR}`, mood: "wave" }];
         lines.push({ text: `Got it, ${withArticle(category)}${forAudience(state)}.` });
       }
       if (outcome.fields.includes("competitors")) {
         lines.push({
-          text: `Noted. I'll watch ${listJoin(state.competitors)}${partial ? " and spot any others in the answers" : ""}.`,
+          text: `Noted. I'll watch ${listJoin(state.competitors)}${turn.partial ? " and spot any others in the answers" : ""}.`,
         });
       }
       if (outcome.declined.includes("competitors")) lines.push({ text: SKIPPED.competitors.skip });
+      if (gotTopics) {
+        lines.push({
+          text: field === "topics" ? `Got it. I'll split the questions evenly across ${listJoin(state.topics)}.` : focus.trim(),
+        });
+      }
+      if (outcome.fields.includes("count")) {
+        lines.push({
+          text: turn.capped
+            ? `${MAX_QUESTION_COUNT} is the most I can ask in one check, so I'll ask ${MAX_QUESTION_COUNT}.`
+            : `Got it, ${questions(questionCount(state))} for each assistant.`,
+        });
+      }
       return ask(lines);
     }
   }
@@ -132,7 +207,13 @@ export function applyTurn(
   field: IntakeField,
   turn: IntakeTurn,
 ): { state: IntakeState; next: IntakeNext; messages: PipLine[] } {
-  const s: IntakeState = { ...state, competitors: [...state.competitors], skipped: [...state.skipped], nudged: [...state.nudged] };
+  const s: IntakeState = {
+    ...state,
+    competitors: [...state.competitors],
+    topics: [...state.topics],
+    skipped: [...state.skipped],
+    nudged: [...state.nudged],
+  };
   const fields: IntakeField[] = [];
   const set = (key: IntakeField) => {
     fields.push(key);
@@ -143,9 +224,17 @@ export function applyTurn(
     const { values } = turn;
     for (const key of INTAKE_FIELDS) {
       if (key !== field && filled(s, key)) continue;
-      if (key === "competitors") {
-        if (values.competitors?.length) {
-          s.competitors = values.competitors;
+      if (key === "competitors" || key === "topics") {
+        const list = values[key];
+        if (list?.length) {
+          s[key] = [...list];
+          set(key);
+        }
+        continue;
+      }
+      if (key === "count") {
+        if (values.count !== undefined) {
+          s.count = values.count;
           set(key);
         }
         continue;
@@ -179,14 +268,14 @@ export function applyTurn(
   if (outcome.kind === "skipped" || outcome.kind === "gave-up") {
     if (!s.skipped.includes(field)) s.skipped.push(field);
     if (field === "competitors") s.competitors = [];
+    if (field === "topics") s.topics = [];
     if (field === "audience") s.audience = "";
     if (field === "website") s.website = undefined;
+    if (field === "count") s.count = undefined;
   }
 
   const next = nextField(s);
   const messages =
-    turn.message && turn.asks === next
-      ? [{ text: turn.message, mood: MOODS[next] }]
-      : rulesLines(s, field, outcome, next, Boolean(turn.partial));
+    turn.message && turn.asks === next ? [{ text: turn.message, mood: MOODS[next] }] : rulesLines(s, field, outcome, next, turn);
   return { state: s, next, messages };
 }

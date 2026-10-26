@@ -26,6 +26,31 @@ describe("rulesTurn", () => {
     });
   });
 
+  it("pulls research topics out of the first message", () => {
+    expect(rulesTurn("product", "research BNB's standing within trading, RWA, AI")).toEqual({
+      intent: "answer",
+      values: { product: "BNB", topics: ["trading", "RWA", "AI"] },
+    });
+    expect(rulesTurn("product", "Acme, a CRM for small agencies, focusing on pipeline management and reporting")).toEqual({
+      intent: "answer",
+      values: { product: "Acme", category: "CRM", audience: "small agencies", topics: ["pipeline management", "reporting"] },
+    });
+  });
+
+  it("reads focus areas at their own step", () => {
+    expect(rulesTurn("topics", "security, staking and DeFi")).toEqual({ intent: "answer", values: { topics: ["security", "staking", "DeFi"] } });
+    expect(rulesTurn("topics", "not sure")).toEqual({ intent: "skip", values: {} });
+    expect(rulesTurn("topics", "Broad check")).toEqual({ intent: "skip", values: {} });
+  });
+
+  it("reads how many questions to ask, capping at 100", () => {
+    expect(rulesTurn("count", "about 50")).toEqual({ intent: "answer", values: { count: 50 } });
+    expect(rulesTurn("count", "max")).toEqual({ intent: "answer", values: { count: 100 } });
+    expect(rulesTurn("count", "300 please")).toEqual({ intent: "answer", values: { count: 100 }, capped: true });
+    expect(rulesTurn("count", "you pick")).toEqual({ intent: "skip", values: {} });
+    expect(rulesTurn("count", "some")).toEqual({ intent: "unclear", values: {} });
+  });
+
   it("flags a partial competitor list", () => {
     expect(rulesTurn("competitors", "Planta, not sure about the rest")).toEqual({
       intent: "answer",

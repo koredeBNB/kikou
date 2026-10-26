@@ -1,6 +1,7 @@
 import {
   INTAKE_FIELDS,
   OPTIONAL_FIELDS,
+  type IntakeField,
   type IntakeIntent,
   type IntakeNext,
   type IntakeTurn,
@@ -8,15 +9,16 @@ import {
   type OptionalField,
 } from "@/lib/intake/types";
 import { siteDomain } from "@/lib/sov/citations";
-import { looksLikeName, readAudience, readCategory } from "@/lib/sov/intake";
+import { looksLikeName, MAX_QUESTION_COUNT, MAX_TOPICS, readAudience, readCategory, readCount } from "@/lib/sov/intake";
 
 const INTENTS: IntakeIntent[] = ["answer", "skip", "unclear"];
 const NEXT: IntakeNext[] = [...INTAKE_FIELDS, "review"];
 const MAX_MESSAGE = 400;
 const MAX_VALUE = 120;
 const MAX_COMPETITORS = 8;
+const MAX_TOPIC = 40;
 
-const nullable = (type: "string" | "array") => ({ type: [type, "null"] });
+const nullable = (type: "string" | "array" | "integer") => ({ type: [type, "null"] });
 
 /** Strict JSON Schema for the intake model's structured output. */
 export const INTAKE_JSON_SCHEMA = {
@@ -35,6 +37,8 @@ export const INTAKE_JSON_SCHEMA = {
         audience: nullable("string"),
         competitors: { ...nullable("array"), items: { type: "string" } },
         website: nullable("string"),
+        topics: { ...nullable("array"), items: { type: "string" } },
+        count: nullable("integer"),
       },
     },
     skips: { type: "array", items: { type: "string", enum: OPTIONAL_FIELDS } },
@@ -69,14 +73,16 @@ function inReply(value: string, reply: string): boolean {
 }
 
 /** A decline only counts when the reply talks about that field, so the model can't skip steps on its own. */
-const TOPICS: Record<OptionalField, RegExp> = {
+const MENTIONS: Record<OptionalField, RegExp> = {
   audience: /\b(?:audience|everyone|anyone|customers?|users?|buyers?)\b/i,
   competitors: /\b(?:competitors?|competition|rivals?|alternatives?)\b/i,
   website: /\b(?:web\s*site|site|domain|url)\b/i,
+  topics: /\b(?:topics?|focus|areas?|angles?|broad|general)\b/i,
+  count: /\b(?:questions?|how\s+many|count|number)\b/i,
 };
 
 function cleanSkips(skips: unknown[], values: IntakeValues, reply: string): OptionalField[] {
-  return OPTIONAL_FIELDS.filter((field) => skips.includes(field) && values[field] === undefined && TOPICS[field].test(reply));
+  return OPTIONAL_FIELDS.filter((field) => skips.includes(field) && values[field] === undefined && MENTIONS[field].test(reply));
 }
 
 function cleanMessage(value: string): string | undefined {
@@ -86,16 +92,21 @@ function cleanMessage(value: string): string | undefined {
   return text;
 }
 
-function cleanValues(values: Json, reply: string): IntakeValues | null {
+const isStringList = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+function cleanValues(values: Json, reply: string, field?: IntakeField): { values: IntakeValues; capped: boolean } | null {
   const out: IntakeValues = {};
   for (const key of ["product", "category", "audience", "website"] as const) {
     const value = values[key];
     if (value !== undefined && value !== null && typeof value !== "string") return null;
   }
   const rawCompetitors = values.competitors;
-  if (rawCompetitors !== undefined && rawCompetitors !== null) {
-    if (!Array.isArray(rawCompetitors) || rawCompetitors.some((c) => typeof c !== "string")) return null;
+  for (const key of ["competitors", "topics"] as const) {
+    const value = values[key];
+    if (value !== undefined && value !== null && !isStringList(value)) return null;
   }
+  const rawCount = values.count;
+  if (rawCount !== undefined && rawCount !== null && !Number.isInteger(rawCount)) return null;
 
   const product = typeof values.product === "string" ? tidy(values.product) : "";
   if (product && looksLikeName(product) && inReply(product, reply)) out.product = product;
@@ -126,14 +137,34 @@ function cleanValues(values: Json, reply: string): IntakeValues | null {
     const domain = siteDomain(values.website.trim());
     if (domain && inReply(domain, reply)) out.website = domain;
   }
-  return out;
+
+  if (Array.isArray(values.topics)) {
+    const seen = new Set<string>();
+    const topics: string[] = [];
+    for (const raw of values.topics as string[]) {
+      const topic = tidy(raw).slice(0, MAX_TOPIC).trim();
+      if (!topic || seen.has(topic.toLowerCase()) || topic.split(" ").length > 5 || !inReply(topic, reply)) continue;
+      seen.add(topic.toLowerCase());
+      topics.push(topic);
+      if (topics.length === MAX_TOPICS) break;
+    }
+    if (topics.length) out.topics = topics;
+  }
+
+  // A count needs a number in the reply, and the reply must be about how many questions to ask.
+  let capped = false;
+  if (typeof rawCount === "number" && rawCount >= 1 && readCount(reply).kind === "ok" && (field === "count" || /\bquestions?\b/i.test(reply))) {
+    out.count = Math.min(rawCount, MAX_QUESTION_COUNT);
+    capped = rawCount > MAX_QUESTION_COUNT;
+  }
+  return { values: out, capped };
 }
 
 /**
  * Validates the model's structured output and cleans its values with the same rules as the
  * parser. Returns null when the output is unusable, so the caller can fall back to the rules.
  */
-export function parseIntakeTurn(raw: unknown, reply: string): IntakeTurn | null {
+export function parseIntakeTurn(raw: unknown, reply: string, field?: IntakeField): IntakeTurn | null {
   const data = decode(raw);
   if (!isObject(data)) return null;
   const { intent, values, skips, asks, message } = data;
@@ -143,12 +174,13 @@ export function parseIntakeTurn(raw: unknown, reply: string): IntakeTurn | null 
   if (values !== undefined && !isObject(values)) return null;
   if (skips !== undefined && skips !== null && !Array.isArray(skips)) return null;
 
-  const cleaned = cleanValues(values ?? {}, reply);
+  const cleaned = cleanValues(values ?? {}, reply, field);
   if (!cleaned) return null;
-  if (intent === "answer" && Object.keys(cleaned).length === 0) return null;
+  if (intent === "answer" && Object.keys(cleaned.values).length === 0) return null;
 
-  const turn: IntakeTurn = { intent: intent as IntakeIntent, values: cleaned, asks: asks as IntakeNext };
-  const declined = cleanSkips(Array.isArray(skips) ? skips : [], cleaned, reply);
+  const turn: IntakeTurn = { intent: intent as IntakeIntent, values: cleaned.values, asks: asks as IntakeNext };
+  if (cleaned.capped) turn.capped = true;
+  const declined = cleanSkips(Array.isArray(skips) ? skips : [], cleaned.values, reply);
   if (declined.length) turn.skips = declined;
   const text = cleanMessage(message);
   if (text) turn.message = text;

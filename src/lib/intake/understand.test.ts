@@ -35,15 +35,15 @@ describe("understandReply", () => {
 
   it("skips competitors declined inside an all-in-one reply, so Pip doesn't ask again", async () => {
     const reply = `${fullReply}. competitors? honestly not sure`;
-    const client = clientReturning(JSON.stringify({ ...modelTurn, skips: ["competitors"], asks: "review", message: "Thanks, that's everything!" }));
+    const client = clientReturning(JSON.stringify({ ...modelTurn, skips: ["competitors"], asks: "topics", message: "Thanks! Any focus areas?" }));
     const result = await understandReply({ field: "product", reply, state: emptyIntake() }, { env, client });
     expect(result).toMatchObject({ source: "ai", turn: { skips: ["competitors"] } });
     const applied = applyTurn(emptyIntake(), "product", result.turn);
-    expect(applied.next).toBe("review");
+    expect(applied.next).toBe("topics");
     expect(applied.state.skipped).toEqual(["competitors"]);
 
     const rules = await understandReply({ field: "product", reply, state: emptyIntake() }, { env: {} });
-    expect(applyTurn(emptyIntake(), "product", rules.turn).next).toBe("review");
+    expect(applyTurn(emptyIntake(), "product", rules.turn).next).toBe("topics");
   });
 
   it("tells the model about declined fields", () => {

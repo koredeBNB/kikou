@@ -3,9 +3,12 @@ import {
   readAudience,
   readCategory,
   readCompetitors,
+  readCount,
   readProduct,
+  readTopics,
   readWebsite,
   takeCompetitorSkip,
+  takeTopics,
   takeWebsite,
   type Reply,
 } from "@/lib/sov/intake";
@@ -22,15 +25,24 @@ function fromReply<T>(reply: Reply<T>, values: (value: T) => IntakeTurn["values"
 /** The rule-based reading of a reply: used without a model, and whenever the model fails. */
 export function rulesTurn(field: IntakeField, reply: string): IntakeTurn {
   if (field === "website") return fromReply(readWebsite(reply), (website) => ({ website }));
-  const declined = field === "competitors" ? { text: reply, skipped: false } : takeCompetitorSkip(reply);
+  if (field === "topics") return fromReply(readTopics(reply), (topics) => ({ topics }));
+  if (field === "count") {
+    const read = readCount(reply);
+    const turn = fromReply(read, ({ count }) => ({ count }));
+    if (read.kind === "ok" && read.value.capped) turn.capped = true;
+    return turn;
+  }
+  const focused = takeTopics(reply);
+  const declined = field === "competitors" ? { text: focused.text, skipped: false } : takeCompetitorSkip(focused.text);
   const { text, website } = takeWebsite(declined.text);
   const turn = readField(field, text);
   if (website && turn.intent === "answer") turn.values.website = website;
+  if (focused.topics && turn.intent === "answer") turn.values.topics = focused.topics;
   if (declined.skipped) turn.skips = ["competitors"];
   return turn;
 }
 
-function readField(field: Exclude<IntakeField, "website">, reply: string): IntakeTurn {
+function readField(field: Exclude<IntakeField, "website" | "topics" | "count">, reply: string): IntakeTurn {
   switch (field) {
     case "product":
       return fromReply(readProduct(reply), (fields) => fields);

@@ -25,9 +25,9 @@ import { Button } from "@/components/ui/button";
 import { useCheckRun, type RunState } from "@/hooks/use-check-run";
 import { ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
-import { applyTurn, emptyIntake, toBrief } from "@/lib/intake/flow";
+import { applyTurn, emptyIntake, questionCount, toBrief, topicExamples } from "@/lib/intake/flow";
 import { requestIntake } from "@/lib/intake/request";
-import type { IntakeField, IntakeState } from "@/lib/intake/types";
+import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/types";
 import { readPlanReply } from "@/lib/sov/intake";
 import { generateQuestions, normalizeBrief } from "@/lib/sov/questions";
 import { buildReport } from "@/lib/sov/report";
@@ -35,7 +35,7 @@ import { newRunId, saveRun } from "@/lib/sov/storage";
 import { MODEL_IDS, MODEL_LABELS, type Brief, type ModelAnswer, type ModelId, type Question } from "@/lib/sov/types";
 import type { CheckRequest } from "@/lib/sov/events";
 
-type Step = "product" | "category" | "audience" | "competitors" | "website" | "review" | "running" | "done";
+type Step = IntakeField | "review" | "running" | "done";
 
 type PipItem = { kind: "text"; text: string; mood?: PipMood } | { kind: "plan" | "run" | "summary" };
 type Message = { id: string; role: "user"; text: string } | ({ id: string; role: "pip" } & PipItem);
@@ -65,6 +65,8 @@ const PLACEHOLDERS: Record<Step, string> = {
   audience: "e.g. small agencies, new plant parents",
   competitors: "e.g. HubSpot, Pipedrive, Close",
   website: "e.g. acme.com",
+  topics: "e.g. pricing, security, integrations",
+  count: "e.g. 25, or “max”",
   review: "Add your own buyer question…",
   running: "Pip is listening to the assistants…",
   done: "Check another product…",
@@ -95,8 +97,7 @@ function Rich({ text }: { text: string }) {
 }
 
 const typingDelay = (item: PipItem) => (item.kind === "text" ? Math.min(450 + item.text.length * 6, 1100) : 350);
-const isIntakeStep = (step: Step): step is IntakeField =>
-  step === "product" || step === "category" || step === "audience" || step === "competitors" || step === "website";
+const isIntakeStep = (step: Step): step is IntakeField => (INTAKE_FIELDS as readonly string[]).includes(step);
 
 function guessDomain(product: string): string | null {
   const slug = product.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -215,10 +216,10 @@ export function CheckExperience() {
   }, [messages.length, typing, run.answers.length]);
 
   const goReview = useCallback(
-    async (brief: Brief) => {
+    async (brief: Brief, count: number) => {
       const normalized = normalizeBrief(brief);
       setDraft(normalized);
-      const questions = generateQuestions(normalized);
+      const questions = generateQuestions(normalized).slice(0, count);
       setPlanned(questions.map((question) => ({ question, enabled: true })));
       setStep("review");
       await say(
@@ -243,7 +244,7 @@ export function CheckExperience() {
       Date.now() - started,
     );
     setTyping(false);
-    if (next === "review") await goReview(toBrief(nextState));
+    if (next === "review") await goReview(toBrief(nextState), questionCount(nextState));
     else setStep(next);
   };
 
@@ -333,6 +334,10 @@ export function CheckExperience() {
         const guess = guessDomain(intake.product);
         return guess ? [guess, "Skip"] : ["Skip"];
       }
+      case "topics":
+        return [topicExamples(intake.category).join(", "), "Broad check"];
+      case "count":
+        return ["10", "25", "50", "100"];
       default:
         return [];
     }

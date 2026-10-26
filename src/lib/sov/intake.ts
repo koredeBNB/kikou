@@ -254,6 +254,113 @@ export function readWebsite(input: string): Reply<string> {
   return { kind: "unclear" };
 }
 
+export const MAX_QUESTION_COUNT = 100;
+export const MAX_TOPICS = 5;
+const MAX_TOPIC_CHARS = 40;
+
+const UNITS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const TENS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const COUNT_MAX = /\b(?:max(?:imum)?|as many as (?:you can|possible)|the most(?: you can)?|all (?:of them|you can))\b/;
+const COUNT_SKIP = /\b(?:you\s+(?:pick|choose|decide)|up\s+to\s+you|your\s+call|default|standard|usual|normal|whatever|recommended)\b/;
+
+function numberWords(text: string): number | null {
+  const tokens = text.replace(/-/g, " ").split(/\s+/);
+  for (let i = 0; i < tokens.length; i++) {
+    const word = tokens[i];
+    if (word === "hundred" && (i === 0 || ["a", "one"].includes(tokens[i - 1]))) return 100;
+    if (word === "dozen") {
+      const before = tokens[i - 1];
+      return 12 * (UNITS[before] ?? 1);
+    }
+    if (TENS[word] !== undefined) {
+      const unit = UNITS[tokens[i + 1]];
+      return TENS[word] + (unit !== undefined && unit < 10 ? unit : 0);
+    }
+    if (UNITS[word] !== undefined && tokens[i + 1] !== "dozen" && tokens[i + 1] !== "hundred") return UNITS[word];
+  }
+  return null;
+}
+
+/** How many questions to ask each assistant: "25", "about fifty", "max". Anything over 100 is capped. */
+export function readCount(input: string): Reply<{ count: number; capped: boolean }> {
+  const text = normalise(input).replace(/\?/g, " ").trim();
+  if (COUNT_MAX.test(text)) return { kind: "ok", value: { count: MAX_QUESTION_COUNT, capped: false } };
+  const digits = input.replace(/(\d),(\d{3})\b/g, "$1$2").match(/\d+/);
+  const count = digits ? Number(digits[0]) : numberWords(text);
+  if (count !== null) {
+    if (count < 1) return { kind: "unclear" };
+    return { kind: "ok", value: { count: Math.min(count, MAX_QUESTION_COUNT), capped: count > MAX_QUESTION_COUNT } };
+  }
+  if (isNonAnswer(text) || COUNT_SKIP.test(text)) return { kind: "skip" };
+  return { kind: "unclear" };
+}
+
+const TOPIC_SKIP =
+  /^(?:(?:a\s+|keep\s+it\s+|just\s+)?(?:broad|general|wide)(?:\s+(?:check|one|search|overview))?|generally|everything|all of it|all of them|across the board|the whole (?:category|thing)|no(?:\s+(?:particular|specific))?\s+(?:focus|topics?|areas?)|nothing (?:specific|in particular)|none in particular)$/;
+const TOPIC_LEAD =
+  /^(?:(?:i'?d\s+like\s+(?:you\s+)?to|let'?s|please|can\s+you|could\s+you|maybe|probably|mostly|mainly|primarily|especially|ideally)\s+|(?:focus(?:ing)?\s+(?:on|around)|look\s+at|dig\s+into|cover|within|around|on)\s+|(?:topics?|focus(?:\s+areas?)?)\s*(?::|are|is)?\s+)/i;
+
+function topicList(input: string): { topics: string[]; rejected: number } {
+  const items = stripLeads(clean(input), TOPIC_LEAD)
+    .split(/\s*(?:,|;|\n|\/|\+|&|\band\b|\bor\b)\s*/i)
+    .map((item) => clean(stripLeads(item, TOPIC_LEAD)).replace(/^(?:the|a|an)\s+/i, "").replace(/\s+(?:etc|and so on)$/i, ""))
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const topics: string[] = [];
+  let rejected = 0;
+  for (const item of items) {
+    if (words(item).length > 5 || isNonAnswer(item) || !/\p{L}/u.test(item)) {
+      rejected++;
+      continue;
+    }
+    const topic = item.slice(0, MAX_TOPIC_CHARS).trim();
+    if (seen.has(topic.toLowerCase())) continue;
+    seen.add(topic.toLowerCase());
+    if (topics.length < MAX_TOPICS) topics.push(topic);
+  }
+  return { topics, rejected };
+}
+
+/** Focus areas for the check, as a short list. Skipping means a broad check. */
+export function readTopics(input: string): Reply<string[]> {
+  const text = input.trim();
+  const plain = normalise(text).replace(/\?/g, "").trim();
+  if (isNonAnswer(text) || TOPIC_SKIP.test(plain)) return { kind: "skip" };
+  const { topics } = topicList(text);
+  return topics.length ? { kind: "ok", value: topics } : { kind: "unclear" };
+}
+
+const STANDING = String.raw`(?:standing|position(?:ing)?|visibility|presence|reputation|share\s+of\s+voice|ranking|rank|performance)`;
+const RESEARCH = new RegExp(
+  String.raw`^(?:(?:please|can\s+you|could\s+you|i\s+want\s+to|i'?d\s+like\s+to|help\s+me)\s+)*` +
+    String.raw`(?:research|check|analy[sz]e|look\s+(?:at|into)|see|find\s+out|measure|assess|evaluate|audit|track|explore|show\s+me)\s+` +
+    String.raw`(?:(?:the|our|my)\s+)?(.+?)(?:'s|’s)\s+${STANDING}\s+(?:within|in|across|for|on|around|among)\s+(.+)$`,
+  "i",
+);
+const HOW_RANKS = /^(?:(?:please|tell\s+me|show\s+me)\s+)?how\s+(?:does|do|is|are)\s+(.+?)\s+(?:rank|stand|do|perform|show\s+up|come\s+up|fare)(?:ing)?\s+(?:within|in|across|for|on|around|among)\s+(.+)$/i;
+const FOCUS_CLAUSE =
+  /(?:\s*[,;.]\s*|\s+[-–—]\s+|\s+)(?:(?:and|with|but)\s+)?(?:(?:a\s+)?focus(?:ing|ed)?\s+(?:on|around)|(?:(?:my|our|the)\s+)?(?:focus\s+areas?|topics?)\s*(?::|are|=|would\s+be))\s+(.+)$/i;
+
+/** Splits research topics out of a longer reply: "research BNB's standing within trading, RWA, AI" or "…, focusing on A and B". */
+export function takeTopics(input: string): { text: string; topics?: string[] } {
+  const research = RESEARCH.exec(input.trim()) ?? HOW_RANKS.exec(input.trim());
+  if (research) {
+    const { topics } = topicList(research[2]);
+    const text = clean(research[1]);
+    if (topics.length && text) return { text, topics };
+  }
+  const focus = FOCUS_CLAUSE.exec(input);
+  if (focus) {
+    const { topics } = topicList(focus[1]);
+    const text = input.slice(0, focus.index).replace(/[\s,;.:\-–—]+$/, "").trim();
+    if (topics.length && text) return { text, topics };
+  }
+  return { text: input };
+}
+
 const START =
   /^(?:let'?s\s+(?:go|start|do\s+(?:it|this))|go(?:\s+ahead)?|start(?:\s+(?:it|now|the\s+check))?|run(?:\s+(?:it|the\s+check))?|yes|yep|yeah|yup|sure|ok(?:ay)?|looks?\s+good|sounds?\s+good|perfect|great|ready|do\s+it|ask(?:\s+them)?|that'?s\s+(?:all|it|everything)|all\s+good|good\s+to\s+go)$/;
 

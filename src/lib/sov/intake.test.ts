@@ -6,10 +6,101 @@ import {
   readAudience,
   readCategory,
   readCompetitors,
+  readCount,
   readPlanReply,
   readProduct,
+  readTopics,
   readWebsite,
+  takeTopics,
 } from "@/lib/sov/intake";
+
+describe("readCount", () => {
+  it.each([
+    ["25", 25],
+    ["about 50", 50],
+    ["50 please", 50],
+    ["let's do 10 questions", 10],
+    ["ten", 10],
+    ["twenty-five", 25],
+    ["twenty five", 25],
+    ["fifty", 50],
+    ["a hundred", 100],
+    ["one hundred", 100],
+    ["a dozen", 12],
+    ["two dozen", 24],
+    ["max", 100],
+    ["the maximum", 100],
+    ["as many as you can", 100],
+    ["100", 100],
+  ])("reads %j as %i", (reply, count) => {
+    expect(readCount(reply)).toEqual({ kind: "ok", value: { count, capped: false } });
+  });
+
+  it("caps anything above 100", () => {
+    expect(readCount("250")).toEqual({ kind: "ok", value: { count: 100, capped: true } });
+    expect(readCount("1,000 questions")).toEqual({ kind: "ok", value: { count: 100, capped: true } });
+  });
+
+  it("skips when the user leaves it to Pip", () => {
+    for (const reply of ["not sure", "you pick", "whatever you think", "skip", "the default", "up to you"]) {
+      expect(readCount(reply)).toEqual({ kind: "skip" });
+    }
+  });
+
+  it("flags replies without a usable number", () => {
+    for (const reply of ["0", "some", "a good amount I guess"]) expect(readCount(reply)).toEqual({ kind: "unclear" });
+  });
+});
+
+describe("readTopics", () => {
+  it("reads a list of focus areas", () => {
+    expect(readTopics("trading, RWA, AI")).toEqual({ kind: "ok", value: ["trading", "RWA", "AI"] });
+    expect(readTopics("Focus on security and staking.")).toEqual({ kind: "ok", value: ["security", "staking"] });
+    expect(readTopics("mostly DeFi; NFTs & payments")).toEqual({ kind: "ok", value: ["DeFi", "NFTs", "payments"] });
+    expect(readTopics("pricing")).toEqual({ kind: "ok", value: ["pricing"] });
+  });
+
+  it("keeps at most five topics and drops repeats", () => {
+    expect(readTopics("security, staking, DeFi, Security, NFTs, payments, swaps")).toEqual({
+      kind: "ok",
+      value: ["security", "staking", "DeFi", "NFTs", "payments"],
+    });
+  });
+
+  it("treats a broad check or uncertainty as a skip", () => {
+    for (const reply of ["Broad check", "broad", "not sure", "skip", "no particular focus", "everything", "keep it general"]) {
+      expect(readTopics(reply)).toEqual({ kind: "skip" });
+    }
+  });
+
+  it("flags rambling that isn't a list", () => {
+    expect(readTopics("I want to know how we do compared with all the others in the market overall really")).toEqual({ kind: "unclear" });
+  });
+});
+
+describe("takeTopics", () => {
+  it("splits research topics out of a first message", () => {
+    expect(takeTopics("research BNB's standing within trading, RWA, AI")).toEqual({ text: "BNB", topics: ["trading", "RWA", "AI"] });
+    expect(takeTopics("Check Trust Wallet's visibility in security, staking and DeFi")).toEqual({
+      text: "Trust Wallet",
+      topics: ["security", "staking", "DeFi"],
+    });
+    expect(takeTopics("how does Acme rank for reporting and invoicing?")).toEqual({ text: "Acme", topics: ["reporting", "invoicing"] });
+  });
+
+  it("finds a focus clause at the end of an intro", () => {
+    expect(takeTopics("Acme, a CRM for small agencies, focusing on pipeline management and reporting")).toEqual({
+      text: "Acme, a CRM for small agencies",
+      topics: ["pipeline management", "reporting"],
+    });
+    expect(takeTopics("Acme, a CRM. Topics: pricing, integrations")).toEqual({ text: "Acme, a CRM", topics: ["pricing", "integrations"] });
+  });
+
+  it("leaves ordinary intros alone", () => {
+    expect(takeTopics("Acme, a CRM for small agencies")).toEqual({ text: "Acme, a CRM for small agencies" });
+    expect(takeTopics("check Acme, a CRM for small agencies")).toEqual({ text: "check Acme, a CRM for small agencies" });
+  });
+});
 
 describe("parseIntro", () => {
   it("reads product, category and audience from one sentence", () => {
