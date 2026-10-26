@@ -59,7 +59,18 @@ const GENERIC_FIRST_WORDS = new Set([
   "alternatives",
   "honorable",
   "honourable",
+  "for",
+  "start",
+  "whichever",
+  "whatever",
+  "protect",
+  "verify",
+  "download",
+  "avoid",
 ]);
+
+/** “Ledger or Trezor”, “Protect your seed phrase”: choices and advice, not names. */
+const NOT_A_NAME = /\s(?:or|and)\s|\b(?:you|your|yours|my|our|we)\b|\*/i;
 
 /** Criteria that answers use as headings. A name made only of these (and connectors) isn't a brand. */
 const GENERIC_TERMS = new Set([
@@ -78,7 +89,10 @@ const GENERIC_TERMS = new Set([
     "management tools analytics reporting automation customer service setup integration limits limitations",
     "drawbacks downsides benefits advantages strengths weaknesses caveats warnings important final thoughts",
     "takeaway takeaways next steps quick comparison criteria factors tax taxes swaps trading bridging defi",
-    "blockchain crypto cryptocurrency token tokens coin coins performance use cases",
+    "blockchain crypto cryptocurrency token tokens coin coins performance use cases pro evm mainnet testnet",
+    "clear signing air-gapping air-gapped verification physical method methods transaction transactions",
+    "clarity responsibility official sources only native wrapped period periods unbonding provider nft nfts",
+    "supports supported",
   ]
     .join(" ")
     .split(" "),
@@ -100,7 +114,7 @@ function candidateFrom(item: string): string | null {
   if (name.length < 2 || name.length > 40 || words.length > 4) return null;
   if (!/^[\p{Lu}\p{N}]/u.test(name)) return null;
   if (/^\d+$/.test(name) || DESCRIPTOR.test(name)) return null;
-  if (GENERIC_FIRST_WORDS.has(words[0].toLowerCase()) || isGenericPhrase(name)) return null;
+  if (GENERIC_FIRST_WORDS.has(words[0].toLowerCase()) || NOT_A_NAME.test(name) || isGenericPhrase(name)) return null;
   return name;
 }
 

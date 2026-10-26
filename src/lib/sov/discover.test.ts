@@ -77,6 +77,28 @@ describe("discoverBrands with everyday words as headings", () => {
     const text = names.map(item).join("\n");
     expect(discoverBrands([text, text], [])).toEqual(["Coinbase Advanced", "Ocean Protocol", "Coinbase Wallet", "Trust Wallet", "Ledger Live"]);
   });
+
+  it("skips section headings, choices between brands and advice lines", () => {
+    // Headings seen in a live 400-answer crypto wallet check.
+    const junk = [
+      "For Solana",
+      "For Long-Term Security",
+      "Ledger or Trezor",
+      "Ethereum and DeFi",
+      "Whichever you choose",
+      "Protect your recovery phrase",
+      "Verify before you sign",
+      "Start Small",
+      "Pro Tip",
+      "EVM chains",
+      "Supports **Bitcoin",
+      "Clear Signing",
+      "Air-Gapping",
+    ];
+    const brands = ["Sparrow Wallet", "Trezor Safe 3", "Ledger Nano S Plus", "Monero GUI", "BitBox02", "NOW Wallet"];
+    const text = [...junk, ...brands].map((name) => `- **${name}**: details.`).join("\n");
+    expect(discoverBrands([text, text], [])).toEqual(brands);
+  });
 });
 
 describe("discoverBrands on real assistant answers", () => {
