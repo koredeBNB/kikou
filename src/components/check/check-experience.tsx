@@ -23,9 +23,12 @@ import { SummaryCard } from "@/components/check/summary-card";
 import { Icon } from "@/components/icon";
 import { Button } from "@/components/ui/button";
 import { useCheckRun, type RunState } from "@/hooks/use-check-run";
-import { listJoin, ordinal, pct } from "@/lib/format";
+import { ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
-import { readAudience, readCategory, readCompetitors, readPlanReply, readProduct, readWebsite } from "@/lib/sov/intake";
+import { applyTurn, emptyIntake, toBrief } from "@/lib/intake/flow";
+import { requestIntake } from "@/lib/intake/request";
+import type { IntakeField, IntakeState } from "@/lib/intake/types";
+import { readPlanReply } from "@/lib/sov/intake";
 import { generateQuestions, normalizeBrief } from "@/lib/sov/questions";
 import { buildReport } from "@/lib/sov/report";
 import { newRunId, saveRun } from "@/lib/sov/storage";
@@ -91,13 +94,9 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-function nextMissing(draft: Brief): Step {
-  if (!draft.category) return "category";
-  if (!draft.audience) return "audience";
-  return "competitors";
-}
-
-const withArticle = (noun: string) => `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
+const typingDelay = (item: PipItem) => (item.kind === "text" ? Math.min(450 + item.text.length * 6, 1100) : 350);
+const isIntakeStep = (step: Step): step is IntakeField =>
+  step === "product" || step === "category" || step === "audience" || step === "competitors" || step === "website";
 
 function guessDomain(product: string): string | null {
   const slug = product.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -110,6 +109,7 @@ export function CheckExperience() {
   const [typing, setTyping] = useState(false);
   const [step, setStep] = useState<Step>("product");
   const [draft, setDraft] = useState<Brief>(EMPTY_BRIEF);
+  const [intake, setIntake] = useState<IntakeState>(emptyIntake);
   const [planned, setPlanned] = useState<PlannedQuestion[]>([]);
   const [models, setModels] = useState(ALL_MODELS);
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
@@ -118,7 +118,6 @@ export function CheckExperience() {
   const [openAnswer, setOpenAnswer] = useState<ModelAnswer | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const runIdRef = useRef<string | null>(null);
-  const nudgedRef = useRef(new Set<Step>());
 
   useEffect(() => {
     let cancelled = false;
@@ -135,17 +134,19 @@ export function CheckExperience() {
 
   const append = useCallback((...items: Message[]) => setMessages((prev) => [...prev, ...items]), []);
 
-  const say = useCallback(
-    async (...items: PipItem[]) => {
-      for (const item of items) {
+  /** Shows each item after a typing pause. `waited` is time the typing bubble was already up. */
+  const speak = useCallback(
+    async (items: PipItem[], waited = 0) => {
+      for (const [index, item] of items.entries()) {
         setTyping(true);
-        await wait(item.kind === "text" ? Math.min(450 + item.text.length * 6, 1100) : 350);
+        await wait(Math.max(0, typingDelay(item) - (index === 0 ? waited : 0)));
         setTyping(false);
         append({ ...item, id: uid(), role: "pip" });
       }
     },
     [append],
   );
+  const say = useCallback((...items: PipItem[]) => speak(items), [speak]);
 
   const enabledQuestions = useMemo(() => planned.filter((p) => p.enabled).map((p) => p.question), [planned]);
   const selectedModels = useMemo(() => MODEL_IDS.filter((m) => models[m]), [models]);
@@ -223,128 +224,19 @@ export function CheckExperience() {
     [say],
   );
 
-  const askCompetitors = () =>
-    say({
-      kind: "text",
-      text: `Which competitors should I keep an eye on? List a few, separated by commas, or skip and I'll spot them in the answers.`,
-    }).then(() => setStep("competitors"));
-
-  /** True the first time a step gets an answer Pip can't use, so Pip asks once before moving on. */
-  const firstNudge = (at: Step) => {
-    if (nudgedRef.current.has(at)) return false;
-    nudgedRef.current.add(at);
-    return true;
-  };
-
-  const askAudience = (text: string) =>
-    say({ kind: "text", mood: "wave", text: `${text} Who is it for? Describe your typical buyer, or skip if it's for everyone.` }).then(() =>
-      setStep("audience"),
+  const handleIntake = async (field: IntakeField, text: string, state: IntakeState) => {
+    setTyping(true);
+    const started = Date.now();
+    const { turn } = await requestIntake({ field, reply: text, state });
+    const { state: nextState, next, messages: lines } = applyTurn(state, field, turn);
+    setIntake(nextState);
+    await speak(
+      lines.map((line) => ({ kind: "text" as const, ...line })),
+      Date.now() - started,
     );
-
-  const handleProduct = async (text: string) => {
-    const reply = readProduct(text);
-    if (reply.kind !== "ok") {
-      await say({
-        kind: "text",
-        text:
-          reply.kind === "skip"
-            ? "Let's start with the name. What's your product called? A working name is fine."
-            : "I couldn't spot a product name in that. What's it called? Just the name works, like “Acme”, or add what it is: “Acme, a CRM for small agencies”.",
-      });
-      return;
-    }
-    const next = { ...EMPTY_BRIEF, ...reply.value };
-    setDraft(next);
-    const missing = nextMissing(next);
-    if (missing === "category") {
-      setStep("category");
-      await say({
-        kind: "text",
-        mood: "wave",
-        text: `Lovely to meet **${next.product}**! What kind of product is it? A short category works best, like “CRM” or “plant care app”.`,
-      });
-    } else if (missing === "audience") {
-      await askAudience(`**${next.product}**, ${withArticle(next.category)}. Lovely!`);
-    } else {
-      await say({ kind: "text", mood: "happy", text: `Lovely: **${next.product}**, ${withArticle(next.category)} for ${next.audience}.` });
-      await askCompetitors();
-    }
-  };
-
-  const handleCategory = async (text: string) => {
-    const reply = readCategory(text);
-    if (reply.kind !== "ok") {
-      await say({
-        kind: "text",
-        text:
-          reply.kind === "skip"
-            ? "No worries. Think of what a buyer would type into a search box, like “CRM”, “plant care app” or “running shoes”. What would yours be?"
-            : "Could you say that in a few words? Something like “plant care app” or “CRM” works best.",
-      });
-      return;
-    }
-    const next = { ...draft, category: reply.value.category, audience: reply.value.audience ?? draft.audience };
-    setDraft(next);
-    if (next.audience) await askCompetitors();
-    else await askAudience(`Got it, ${withArticle(next.category)}.`);
-  };
-
-  const handleAudience = async (text: string) => {
-    const reply = readAudience(text);
-    if (reply.kind === "unclear" && firstNudge("audience")) {
-      await say({ kind: "text", text: "Could you sum that up in a few words? Something like “small agencies” or “new plant parents”." });
-      return;
-    }
-    if (reply.kind === "ok") {
-      setDraft({ ...draft, audience: reply.value });
-    } else {
-      setDraft({ ...draft, audience: "" });
-      await say({ kind: "text", text: "No problem, I'll keep the questions general." });
-    }
-    await askCompetitors();
-  };
-
-  const handleCompetitors = async (text: string) => {
-    const reply = readCompetitors(text);
-    if (reply.kind === "unclear" && firstNudge("competitors")) {
-      await say({
-        kind: "text",
-        text: "I couldn't pick out any brand names there. Could you list them, like “HubSpot, Pipedrive”? Or skip and I'll spot them in the answers.",
-      });
-      return;
-    }
-    const competitors = reply.kind === "ok" ? reply.value : [];
-    const next = { ...draft, competitors };
-    setDraft(next);
-    await say({
-      kind: "text",
-      text:
-        reply.kind === "ok"
-          ? `Noted. I'll watch ${listJoin(competitors)}${reply.ignored.length ? " and spot any others in the answers" : ""}.`
-          : reply.kind === "skip"
-            ? "No problem, I'll spot your competitors in the answers."
-            : "I still couldn't pick out any brand names, so I'll spot your competitors in the answers instead.",
-    });
-    if (next.website) {
-      await goReview(next);
-      return;
-    }
-    setStep("website");
-    await say({ kind: "text", text: "Last one: what's your website? It helps me notice when assistants cite you. No site yet? Just skip." });
-  };
-
-  const handleWebsite = async (text: string) => {
-    const reply = readWebsite(text);
-    if (reply.kind === "ok") {
-      await goReview({ ...draft, website: reply.value });
-      return;
-    }
-    if (reply.kind === "unclear" && firstNudge("website")) {
-      await say({ kind: "text", text: "I couldn't spot a web address in that. Try something like acme.com, or skip." });
-      return;
-    }
-    await say({ kind: "text", text: "No problem, we'll go without it." });
-    await goReview(draft);
+    setTyping(false);
+    if (next === "review") await goReview(toBrief(nextState));
+    else setStep(next);
   };
 
   const handleReview = async (text: string) => {
@@ -378,10 +270,10 @@ export function CheckExperience() {
   const restart = useCallback(() => {
     resetRun();
     runIdRef.current = null;
-    nudgedRef.current.clear();
     setRunCtx(null);
     setMessages([]);
     setDraft(EMPTY_BRIEF);
+    setIntake(emptyIntake());
     setPlanned([]);
     setModels(ALL_MODELS);
     setStep("product");
@@ -395,29 +287,17 @@ export function CheckExperience() {
     if (step === "done") {
       resetRun();
       runIdRef.current = null;
-      nudgedRef.current.clear();
       setRunCtx(null);
       setPlanned([]);
       setMessages([{ id: uid(), role: "user", text }]);
       setStep("product");
-      await handleProduct(text);
+      setIntake(emptyIntake());
+      await handleIntake("product", text, emptyIntake());
       return;
     }
     append({ id: uid(), role: "user", text });
-    switch (step) {
-      case "product":
-        return handleProduct(text);
-      case "category":
-        return handleCategory(text);
-      case "audience":
-        return handleAudience(text);
-      case "competitors":
-        return handleCompetitors(text);
-      case "website":
-        return handleWebsite(text);
-      case "review":
-        return handleReview(text);
-    }
+    if (isIntakeStep(step)) return handleIntake(step, text, intake);
+    if (step === "review") return handleReview(text);
   };
 
   const startRun = async ({ echo = true }: { echo?: boolean } = {}) => {
@@ -442,7 +322,7 @@ export function CheckExperience() {
       case "competitors":
         return ["Skip"];
       case "website": {
-        const guess = guessDomain(draft.product);
+        const guess = guessDomain(intake.product);
         return guess ? [guess, "Skip"] : ["Skip"];
       }
       default:
