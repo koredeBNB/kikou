@@ -200,6 +200,19 @@ describe("buildReport", () => {
     expect(analytics.product.mentionRate).toBe(1);
   });
 
+  it("flags discovered rivals' sites when no competitors were given", () => {
+    const discovered = buildReport({
+      brief: { product: "Plausible", category: "web analytics", audience: "", competitors: [], website: "plausible.io" },
+      questions: [{ id: "q1", text: "What's the best web analytics?", intent: "best-for" }],
+      answers: [
+        answer("q1", "perplexity", "1. **PostHog**: product analytics.\n2. **Plausible**: simple.", ["https://posthog.com/blog/best", "https://plausible.io/"]),
+        answer("q1", "claude", "- **PostHog**: all in one.\n- **Plausible**: light."),
+      ],
+    });
+    expect(discovered.domains.find((d) => d.domain === "posthog.com")?.isCompetitor).toBe(true);
+    expect(discovered.domains.find((d) => d.domain === "plausible.io")).toMatchObject({ isOwn: true, isCompetitor: false });
+  });
+
   it("never turns user-written questions into intent tips", () => {
     const custom = buildReport({
       brief,

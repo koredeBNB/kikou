@@ -143,7 +143,7 @@ export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 
   const productStats = brands.find((b) => b.isProduct)!;
 
   const ownDomain = siteDomain(brief.website);
-  const competitorKeys = new Set(competitors.map(compact).filter(Boolean));
+  const competitorKeys = new Set([...competitors, ...discovered].map(compact).filter(Boolean));
   const domainMap = new Map<string, { count: number; models: Set<ModelId>; urls: Set<string> }>();
   for (const a of analyzed) {
     for (const c of a.citationList) {
