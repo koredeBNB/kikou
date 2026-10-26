@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { stripTracking } from "@/lib/sov/citations";
 import { cn } from "@/lib/utils";
 
 const INLINE = /\*\*(.+?)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)]+)|(\[\d+\])/g;
@@ -45,14 +46,15 @@ function inline(text: string, product: string, rivals: string[], key: string): R
       out.push(<strong key={`${key}-b${i}`}>{highlight(match[1], product, rivals, `${key}-bb${i}`)}</strong>);
     } else if (match[2] && match[3]) {
       out.push(
-        <a key={`${key}-l${i}`} href={match[3]} target="_blank" rel="noreferrer" className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-2">
+        <a key={`${key}-l${i}`} href={stripTracking(match[3])} target="_blank" rel="noreferrer" className="font-semibold text-sky-700 underline decoration-sky-300 underline-offset-2">
           {match[2]}
         </a>,
       );
     } else if (match[4]) {
+      const url = stripTracking(match[4]);
       out.push(
-        <a key={`${key}-u${i}`} href={match[4]} target="_blank" rel="noreferrer" className="break-all text-sky-700 underline decoration-sky-300 underline-offset-2">
-          {match[4]}
+        <a key={`${key}-u${i}`} href={url} target="_blank" rel="noreferrer" className="break-all text-sky-700 underline decoration-sky-300 underline-offset-2">
+          {url}
         </a>,
       );
     } else if (match[5]) {

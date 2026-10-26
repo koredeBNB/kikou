@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { collectCitations, domainOf, extractUrls } from "@/lib/sov/citations";
+import { collectCitations, domainOf, extractUrls, stripTracking } from "@/lib/sov/citations";
+
+describe("stripTracking", () => {
+  it("drops utm_* and click-tracking parameters", () => {
+    expect(stripTracking("https://plausible.io/?trk=public_profile__reactions-text&utm_source=openai")).toBe("https://plausible.io/");
+    expect(stripTracking("https://shop.example.com/item?srsltid=AfmBOo123&fbclid=x&gclid=y&msclkid=z")).toBe("https://shop.example.com/item");
+    expect(stripTracking("https://example.com/a?UTM_Source=openai&Utm_Medium=chat")).toBe("https://example.com/a");
+  });
+
+  it("keeps other parameters and the fragment", () => {
+    expect(stripTracking("https://example.com/pricing?plan=pro&utm_medium=x&_hsenc=abc#faq")).toBe("https://example.com/pricing?plan=pro#faq");
+  });
+
+  it("leaves a URL with nothing to strip exactly as it was", () => {
+    for (const url of ["https://example.com/a?b=1&c=two%20words", "https://github.com/acme/app?ref=main", "https://example.com", "not a url"]) {
+      expect(stripTracking(url)).toBe(url);
+    }
+  });
+});
 
 describe("extractUrls", () => {
   it("finds markdown links and bare URLs", () => {
@@ -64,5 +82,17 @@ describe("collectCitations", () => {
 
   it("drops provider entries that are not valid URLs", () => {
     expect(collectCitations("", ["", "garbage"])).toEqual([]);
+  });
+
+  it("strips tracking parameters, so a tagged and an untagged copy count once", () => {
+    const result = collectCitations("Pricing: [plausible.io](https://plausible.io/pricing?utm_source=openai)", [
+      "https://plausible.io/pricing?utm_source=openai",
+      "https://usefathom.com/?ref_src=chat&plan=pro",
+    ]);
+    expect(result).toEqual([
+      { url: "https://plausible.io/pricing", domain: "plausible.io" },
+      { url: "https://usefathom.com/?plan=pro", domain: "usefathom.com" },
+    ]);
+    expect(collectCitations("https://plausible.io/pricing", ["https://plausible.io/pricing?utm_source=openai"])).toHaveLength(1);
   });
 });

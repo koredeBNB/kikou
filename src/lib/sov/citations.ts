@@ -17,6 +17,24 @@ function trimUrl(raw: string): string {
   }
 }
 
+// `ref` is left alone: some sites use it for real content (GitHub branches, for one).
+const TRACKING_PARAM =
+  /^(?:utm_\w+|gclid|gclsrc|dclid|gbraid|wbraid|fbclid|msclkid|yclid|twclid|ttclid|li_fat_id|mc_cid|mc_eid|_hsenc|_hsmi|__hstc|__hssc|__hsfp|igshid|mkt_tok|srsltid|trk|_ga|_gl|ref_src)$/i;
+
+/** Removes tracking parameters such as `utm_source=openai`. URLs with none come back unchanged. */
+export function stripTracking(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const tracking = [...parsed.searchParams.keys()].filter((key) => TRACKING_PARAM.test(key));
+  if (tracking.length === 0) return url;
+  for (const key of tracking) parsed.searchParams.delete(key);
+  return parsed.toString();
+}
+
 export function domainOf(url: string): string | null {
   try {
     const parsed = new URL(url.trim());
@@ -52,7 +70,7 @@ export function collectCitations(text: string, providerCitations: string[] = [])
   const seen = new Set<string>();
   const citations: Citation[] = [];
   for (const raw of [...providerCitations, ...extractUrls(text)]) {
-    const url = raw.trim();
+    const url = stripTracking(raw.trim());
     const domain = domainOf(url);
     if (!domain) continue;
     const key = dedupeKey(url);

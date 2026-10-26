@@ -86,7 +86,7 @@ The scoring is deliberately simple so you can explain it to your team. It lives 
 - **Mention rate** is answers mentioning the brand divided by all answers.
 - **Share of voice** is a brand's mentions divided by all brand mentions, overall or within one assistant's answers.
 - **Rivals** are the competitors you list, plus any brand that appears as a list item in at least two answers.
-- **Sources** are the provider's citations plus links written into the answer, deduplicated per answer and grouped by domain.
+- **Sources** are the provider's citations plus links written into the answer, with tracking parameters such as `utm_source` removed, deduplicated per answer and grouped by domain.
 - **Sentiment** is a light word list around each mention with negation handling. It's a direction, not a verdict.
 
 ## Project layout
