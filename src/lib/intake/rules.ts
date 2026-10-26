@@ -1,5 +1,14 @@
 import type { IntakeField, IntakeTurn } from "@/lib/intake/types";
-import { readAudience, readCategory, readCompetitors, readProduct, readWebsite, takeWebsite, type Reply } from "@/lib/sov/intake";
+import {
+  readAudience,
+  readCategory,
+  readCompetitors,
+  readProduct,
+  readWebsite,
+  takeCompetitorSkip,
+  takeWebsite,
+  type Reply,
+} from "@/lib/sov/intake";
 
 const SKIP: IntakeTurn = { intent: "skip", values: {} };
 const UNCLEAR: IntakeTurn = { intent: "unclear", values: {} };
@@ -13,9 +22,11 @@ function fromReply<T>(reply: Reply<T>, values: (value: T) => IntakeTurn["values"
 /** The rule-based reading of a reply: used without a model, and whenever the model fails. */
 export function rulesTurn(field: IntakeField, reply: string): IntakeTurn {
   if (field === "website") return fromReply(readWebsite(reply), (website) => ({ website }));
-  const { text, website } = takeWebsite(reply);
+  const declined = field === "competitors" ? { text: reply, skipped: false } : takeCompetitorSkip(reply);
+  const { text, website } = takeWebsite(declined.text);
   const turn = readField(field, text);
   if (website && turn.intent === "answer") turn.values.website = website;
+  if (declined.skipped) turn.skips = ["competitors"];
   return turn;
 }
 

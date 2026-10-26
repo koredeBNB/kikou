@@ -54,6 +54,24 @@ describe("rulesTurn", () => {
     });
   });
 
+  it("takes an inline competitor decline out of an all-in-one reply", () => {
+    const values = { product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app" };
+    expect(rulesTurn("product", "It's Fernly, a plant care app for new plant parents, site's fernly.app. Competitors? Honestly not sure")).toEqual({
+      intent: "answer",
+      values,
+      skips: ["competitors"],
+    });
+    expect(rulesTurn("product", "It's Fernly, a plant care app for new plant parents, site's fernly.app. Not sure about competitors yet")).toEqual({
+      intent: "answer",
+      values,
+      skips: ["competitors"],
+    });
+  });
+
+  it("doesn't read a competitor list as a decline", () => {
+    expect(rulesTurn("product", "Acme, a CRM for small agencies. Competitors are HubSpot and Pipedrive").skips).toBeUndefined();
+  });
+
   it("leaves dotted product names and tech terms alone", () => {
     expect(rulesTurn("product", "monday.com, a work OS for teams")).toEqual({
       intent: "answer",

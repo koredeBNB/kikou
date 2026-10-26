@@ -1,10 +1,12 @@
 import {
   INTAKE_FIELDS,
+  OPTIONAL_FIELDS,
   REQUIRED_FIELDS,
   type IntakeField,
   type IntakeNext,
   type IntakeState,
   type IntakeTurn,
+  type OptionalField,
   type PipLine,
 } from "@/lib/intake/types";
 import { listJoin } from "@/lib/format";
@@ -79,7 +81,9 @@ const SKIPPED: Record<"audience" | "competitors" | "website", { skip: string; ga
   website: { skip: "No problem, we'll go without it.", gaveUp: "No problem, we'll go without it." },
 };
 
-type Outcome = { kind: "filled"; fields: IntakeField[] } | { kind: "skipped" | "gave-up" | "unclear" | "skip-required" };
+type Outcome =
+  | { kind: "filled"; fields: IntakeField[]; declined: OptionalField[] }
+  | { kind: "skipped" | "gave-up" | "unclear" | "skip-required" };
 
 function rulesLines(state: IntakeState, field: IntakeField, outcome: Outcome, next: IntakeNext, partial: boolean): PipLine[] {
   const ask = (lines: PipLine[]) => (next === "review" ? lines : [...lines, { text: questionFor(next, state) }]);
@@ -111,6 +115,7 @@ function rulesLines(state: IntakeState, field: IntakeField, outcome: Outcome, ne
           text: `Noted. I'll watch ${listJoin(state.competitors)}${partial ? " and spot any others in the answers" : ""}.`,
         });
       }
+      if (outcome.declined.includes("competitors")) lines.push({ text: SKIPPED.competitors.skip });
       return ask(lines);
     }
   }
@@ -153,10 +158,15 @@ export function applyTurn(
     }
   }
 
+  const declined = (turn.skips ?? []).filter(
+    (key) => OPTIONAL_FIELDS.includes(key) && key !== field && !filled(s, key) && !s.skipped.includes(key),
+  );
+  s.skipped.push(...declined);
+
   const required = REQUIRED_FIELDS.includes(field);
   let outcome: Outcome;
   if (fields.includes(field)) {
-    outcome = { kind: "filled", fields };
+    outcome = { kind: "filled", fields, declined };
   } else if (turn.intent === "skip") {
     outcome = { kind: required ? "skip-required" : "skipped" };
   } else if (required || !s.nudged.includes(field)) {

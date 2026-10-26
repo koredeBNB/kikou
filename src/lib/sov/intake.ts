@@ -107,6 +107,21 @@ export function isNonAnswer(input: string): boolean {
   return NON_ANSWER_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+const COMPETITOR_CLAUSE = /[^.!;,\n]*\b(?:competitors?|competition|rivals?)\b[^.!;,\n]*/gi;
+
+/** Takes a competitor decline ("… Competitors? Honestly not sure") out of a longer reply. */
+export function takeCompetitorSkip(input: string): { text: string; skipped: boolean } {
+  for (const match of input.matchAll(COMPETITOR_CLAUSE)) {
+    if (!isNonAnswer(match[0])) continue;
+    const text = `${input.slice(0, match.index)}${input.slice(match.index + match[0].length)}`
+      .replace(/\s*[,;]\s*(?=[,;.!]|$)/g, "")
+      .replace(/([.!])\s*[.!]+/g, "$1")
+      .trim();
+    return { text, skipped: true };
+  }
+  return { text: input, skipped: false };
+}
+
 const SENTENCE_WORDS = new Set([
   "i", "i'm", "im", "i'd", "i've", "me", "my", "mine", "you", "your", "you're", "we", "we're", "our", "us", "they",
   "they're", "them", "their", "he", "she", "it", "it's", "its", "is", "are", "am", "was", "were", "be", "been", "do",

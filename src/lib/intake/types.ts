@@ -4,6 +4,8 @@ export type IntakeField = (typeof INTAKE_FIELDS)[number];
 export type IntakeNext = IntakeField | "review";
 
 export const REQUIRED_FIELDS: readonly IntakeField[] = ["product", "category"];
+export const OPTIONAL_FIELDS = ["audience", "competitors", "website"] as const;
+export type OptionalField = (typeof OPTIONAL_FIELDS)[number];
 
 export type IntakeIntent = "answer" | "skip" | "unclear";
 
@@ -19,6 +21,8 @@ export interface IntakeValues {
 export interface IntakeTurn {
   intent: IntakeIntent;
   values: IntakeValues;
+  /** Other optional fields the reply declines, e.g. "competitors? honestly not sure" in an all-in-one reply. */
+  skips?: OptionalField[];
   /** The field the model's message asks for. Only set with a model message. */
   asks?: IntakeNext;
   /** Pip's next message, written by the model. Rule-based turns leave it empty. */

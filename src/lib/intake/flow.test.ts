@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyTurn, emptyIntake, nextField, questionFor, toBrief } from "@/lib/intake/flow";
-import type { IntakeState } from "@/lib/intake/types";
+import type { IntakeState, OptionalField } from "@/lib/intake/types";
 
 const withState = (patch: Partial<IntakeState>): IntakeState => ({ ...emptyIntake(), ...patch });
 const texts = (lines: { text: string }[]) => lines.map((l) => l.text);
@@ -130,6 +130,32 @@ describe("applyTurn", () => {
     expect(texts(result.messages)).toEqual([
       "**Fernly**, a plant care app. Lovely! Who is it for? Describe your typical buyer, or skip if it's for everyone.",
     ]);
+  });
+
+  it("records an optional field the reply declines alongside its other answers", () => {
+    const result = applyTurn(emptyIntake(), "product", {
+      intent: "answer",
+      values: { product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app" },
+      skips: ["competitors"],
+    });
+    expect(result.state.skipped).toEqual(["competitors"]);
+    expect(result.next).toBe("review");
+    expect(texts(result.messages)).toEqual([
+      "Lovely: **Fernly**, a plant care app for new plant parents.",
+      "No problem, I'll spot your competitors in the answers.",
+    ]);
+  });
+
+  it("ignores declines for required or already answered fields", () => {
+    const state = withState({ product: "Fernly", category: "plant care app", competitors: ["Planta"] });
+    const result = applyTurn(state, "audience", {
+      intent: "answer",
+      values: { audience: "new plant parents" },
+      skips: ["product", "category", "competitors"] as OptionalField[],
+    });
+    expect(result.state.skipped).toEqual([]);
+    expect(result.state.competitors).toEqual(["Planta"]);
+    expect(result.next).toBe("website");
   });
 
   it("mentions the rest of a partial competitor list", () => {

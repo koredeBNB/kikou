@@ -12,9 +12,28 @@ const reply = "It's Fernly, a plant care app for new plant parents, site's fernl
 describe("INTAKE_JSON_SCHEMA", () => {
   it("is a strict schema that requires every key", () => {
     expect(INTAKE_JSON_SCHEMA.additionalProperties).toBe(false);
-    expect(INTAKE_JSON_SCHEMA.required).toEqual(["intent", "values", "asks", "message"]);
+    expect(INTAKE_JSON_SCHEMA.required).toEqual(["intent", "values", "skips", "asks", "message"]);
     expect(INTAKE_JSON_SCHEMA.properties.values.required).toEqual(["product", "category", "audience", "competitors", "website"]);
     expect(INTAKE_JSON_SCHEMA.properties.intent.enum).toEqual(["answer", "skip", "unclear"]);
+    expect(INTAKE_JSON_SCHEMA.properties.skips.items.enum).toEqual(["audience", "competitors", "website"]);
+  });
+});
+
+describe("parseIntakeTurn skips", () => {
+  const messy = "It's Fernly, a plant care app for new plant parents, site's fernly.app. competitors? honestly not sure";
+
+  it("keeps declined optional fields that the reply talks about", () => {
+    const turn = parseIntakeTurn({ ...valid, skips: ["competitors", "audience"], asks: "review" }, messy);
+    expect(turn?.skips).toEqual(["competitors"]);
+  });
+
+  it("drops skips for fields that were also given a value, or aren't optional", () => {
+    const turn = parseIntakeTurn({ ...valid, skips: ["website", "product", "pricing"] }, messy);
+    expect(turn?.skips).toBeUndefined();
+  });
+
+  it("rejects skips that aren't a list", () => {
+    expect(parseIntakeTurn({ ...valid, skips: "competitors" }, messy)).toBeNull();
   });
 });
 

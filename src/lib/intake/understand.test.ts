@@ -32,6 +32,23 @@ describe("understandReply", () => {
     expect(applied.messages.map((m) => m.text)).toEqual([modelTurn.message]);
   });
 
+  it("skips competitors declined inside an all-in-one reply, so Pip doesn't ask again", async () => {
+    const reply = `${fullReply}. competitors? honestly not sure`;
+    const client = clientReturning(JSON.stringify({ ...modelTurn, skips: ["competitors"], asks: "review", message: "Thanks, that's everything!" }));
+    const result = await understandReply({ field: "product", reply, state: emptyIntake() }, { env, client });
+    expect(result).toMatchObject({ source: "ai", turn: { skips: ["competitors"] } });
+    const applied = applyTurn(emptyIntake(), "product", result.turn);
+    expect(applied.next).toBe("review");
+    expect(applied.state.skipped).toEqual(["competitors"]);
+
+    const rules = await understandReply({ field: "product", reply, state: emptyIntake() }, { env: {} });
+    expect(applyTurn(emptyIntake(), "product", rules.turn).next).toBe("review");
+  });
+
+  it("tells the model about declined fields", () => {
+    expect(buildIntakePrompt({ field: "product", reply: "x", state: emptyIntake() }).system).toMatch(/skips: .*competitors\? honestly not sure/);
+  });
+
   it("uses the rules with no key, without calling a model", async () => {
     const client = clientReturning(modelTurn);
     const result = await understandReply({ field: "competitors", reply: "not sure find them for me", state: emptyIntake() }, { env: {}, client });

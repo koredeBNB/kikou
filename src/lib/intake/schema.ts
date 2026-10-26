@@ -1,4 +1,12 @@
-import { INTAKE_FIELDS, type IntakeIntent, type IntakeNext, type IntakeTurn, type IntakeValues } from "@/lib/intake/types";
+import {
+  INTAKE_FIELDS,
+  OPTIONAL_FIELDS,
+  type IntakeIntent,
+  type IntakeNext,
+  type IntakeTurn,
+  type IntakeValues,
+  type OptionalField,
+} from "@/lib/intake/types";
 import { siteDomain } from "@/lib/sov/citations";
 import { looksLikeName, readAudience, readCategory } from "@/lib/sov/intake";
 
@@ -14,7 +22,7 @@ const nullable = (type: "string" | "array") => ({ type: [type, "null"] });
 export const INTAKE_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["intent", "values", "asks", "message"],
+  required: ["intent", "values", "skips", "asks", "message"],
   properties: {
     intent: { type: "string", enum: INTENTS },
     values: {
@@ -29,6 +37,7 @@ export const INTAKE_JSON_SCHEMA = {
         website: nullable("string"),
       },
     },
+    skips: { type: "array", items: { type: "string", enum: OPTIONAL_FIELDS } },
     asks: { type: "string", enum: NEXT },
     message: { type: "string" },
   },
@@ -57,6 +66,17 @@ const tidy = (value: string) => value.replace(/\s+/g, " ").trim().replace(/[.!?,
 function inReply(value: string, reply: string): boolean {
   const needle = squash(value);
   return needle.length > 0 && ` ${squash(reply)} `.includes(` ${needle} `);
+}
+
+/** A decline only counts when the reply talks about that field, so the model can't skip steps on its own. */
+const TOPICS: Record<OptionalField, RegExp> = {
+  audience: /\b(?:audience|everyone|anyone|customers?|users?|buyers?)\b/i,
+  competitors: /\b(?:competitors?|competition|rivals?|alternatives?)\b/i,
+  website: /\b(?:web\s*site|site|domain|url)\b/i,
+};
+
+function cleanSkips(skips: unknown[], values: IntakeValues, reply: string): OptionalField[] {
+  return OPTIONAL_FIELDS.filter((field) => skips.includes(field) && values[field] === undefined && TOPICS[field].test(reply));
 }
 
 function cleanMessage(value: string): string | undefined {
@@ -116,17 +136,20 @@ function cleanValues(values: Json, reply: string): IntakeValues | null {
 export function parseIntakeTurn(raw: unknown, reply: string): IntakeTurn | null {
   const data = decode(raw);
   if (!isObject(data)) return null;
-  const { intent, values, asks, message } = data;
+  const { intent, values, skips, asks, message } = data;
   if (!INTENTS.includes(intent as IntakeIntent)) return null;
   if (!NEXT.includes(asks as IntakeNext)) return null;
   if (typeof message !== "string") return null;
   if (values !== undefined && !isObject(values)) return null;
+  if (skips !== undefined && skips !== null && !Array.isArray(skips)) return null;
 
   const cleaned = cleanValues(values ?? {}, reply);
   if (!cleaned) return null;
   if (intent === "answer" && Object.keys(cleaned).length === 0) return null;
 
   const turn: IntakeTurn = { intent: intent as IntakeIntent, values: cleaned, asks: asks as IntakeNext };
+  const declined = cleanSkips(Array.isArray(skips) ? skips : [], cleaned, reply);
+  if (declined.length) turn.skips = declined;
   const text = cleanMessage(message);
   if (text) turn.message = text;
   return turn;
