@@ -186,6 +186,16 @@ describe("buildReport", () => {
     expect(withExtra.brands.find((b) => b.brand === "Freshsales")?.isTrackedCompetitor).toBe(false);
   });
 
+  it("never turns user-written questions into intent tips", () => {
+    const custom = buildReport({
+      brief,
+      questions: [{ id: "c1", text: "Which CRM has the cutest mascot?", intent: "custom" }],
+      answers: [answer("c1", "claude", "1. **Close**\n2. **Pipedrive**")],
+    });
+    expect(custom.recommendations.map((r) => r.id)).not.toContain("intent-custom");
+    expect(custom.missingPrompts).toEqual(["c1"]);
+  });
+
   it("does not credit a brand for answers to questions that name it", () => {
     const named = buildReport({
       brief,

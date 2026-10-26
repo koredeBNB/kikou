@@ -1,7 +1,7 @@
 import type { CheckRequest } from "@/lib/sov/events";
 import { MODEL_IDS, type ModelId, type QuestionIntent } from "@/lib/sov/types";
 
-const INTENTS: QuestionIntent[] = ["best-for", "top-list", "alternatives", "budget", "switching", "features"];
+const INTENTS: QuestionIntent[] = ["best-for", "top-list", "alternatives", "budget", "switching", "features", "custom"];
 const MAX_QUESTIONS = 10;
 const MAX_TEXT = 300;
 
@@ -27,7 +27,7 @@ export function validateCheckRequest(input: unknown): ValidationResult {
   const questions = rawQuestions
     .map((q, i) => {
       const item = (q ?? {}) as Record<string, unknown>;
-      const intent = INTENTS.includes(item.intent as QuestionIntent) ? (item.intent as QuestionIntent) : "best-for";
+      const intent = INTENTS.includes(item.intent as QuestionIntent) ? (item.intent as QuestionIntent) : "custom";
       return { id: str(item.id, 20) || `q${i + 1}`, text: str(item.text, MAX_TEXT), intent };
     })
     .filter((q) => q.text);

@@ -22,7 +22,8 @@ export type QuestionIntent =
   | "alternatives"
   | "budget"
   | "switching"
-  | "features";
+  | "features"
+  | "custom";
 
 export interface Question {
   id: string;

@@ -17,7 +17,10 @@ const RETRIEVAL_MODELS = new Set(["perplexity", "gemini"]);
 const MAX_RECOMMENDATIONS = 6;
 const MAX_INTENT_TIPS = 2;
 
-function intentAdvice(intent: QuestionIntent, report: ReportWithoutRecommendations): Omit<Recommendation, "id"> {
+function intentAdvice(
+  intent: Exclude<QuestionIntent, "custom">,
+  report: ReportWithoutRecommendations,
+): Omit<Recommendation, "id"> {
   const { product, category, audience } = report.brief;
   const rival = report.gaps[0]?.competitor ?? report.brief.competitors[0] ?? "your biggest rival";
   const topDomains = report.domains
@@ -105,7 +108,8 @@ export function buildRecommendations(report: ReportWithoutRecommendations): Reco
   }
 
   const intents = [...new Set(report.questions.map((q) => q.intent))];
-  const missedIntents = intents.filter((intent) => {
+  const missedIntents = intents.filter((intent): intent is Exclude<QuestionIntent, "custom"> => {
+    if (intent === "custom") return false;
     const rows = report.prompts.filter((p) => p.question.intent === intent && p.answers > 0);
     return rows.length > 0 && rows.every((p) => p.productMentions === 0);
   });
