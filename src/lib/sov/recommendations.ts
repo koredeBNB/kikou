@@ -73,6 +73,27 @@ function intentAdvice(
         priority: "medium",
         area: "positioning",
       };
+    case "comparison":
+      return {
+        title: "Get into the head-to-head comparisons",
+        detail: `When buyers compare ${category} options, ${product} isn't part of the answer. Publish fair comparison pages and a plain spec sheet so models can place you next to ${rival}.`,
+        priority: "medium",
+        area: "positioning",
+      };
+    case "beginner":
+      return {
+        title: "Be the friendly pick for newcomers",
+        detail: `${product} doesn't come up when beginners ask where to start. A plain-English getting-started guide and simple setup docs give models a reason to suggest you to first-timers.`,
+        priority: "medium",
+        area: "positioning",
+      };
+    case "use-case":
+      return {
+        title: "Show up for specific jobs",
+        detail: `Questions about specific situations${forAudience} don't mention ${product}. Write short use-case pages with real examples so models can match you to the job.`,
+        priority: "low",
+        area: "visibility",
+      };
   }
 }
 

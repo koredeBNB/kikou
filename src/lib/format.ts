@@ -22,5 +22,8 @@ export const INTENT_LABELS: Record<QuestionIntent, string> = {
   budget: "Budget",
   switching: "Switching",
   features: "Features",
+  comparison: "Comparison",
+  beginner: "Beginners",
+  "use-case": "Use case",
   custom: "Your question",
 };

@@ -25,12 +25,17 @@ export type QuestionIntent =
   | "budget"
   | "switching"
   | "features"
+  | "comparison"
+  | "beginner"
+  | "use-case"
   | "custom";
 
 export interface Question {
   id: string;
   text: string;
   intent: QuestionIntent;
+  /** The research topic this question was written for. */
+  topic?: string;
 }
 
 export type AnswerSource = "live" | "mock";

@@ -19,6 +19,13 @@ describe("normalizeBrief", () => {
       website: undefined,
     });
   });
+
+  it("keeps up to five distinct topics, and none when there aren't any", () => {
+    expect(normalizeBrief({ ...brief, topics: [" trading ", "RWA", "", "rwa", "AI"] }).topics).toEqual(["trading", "RWA", "AI"]);
+    expect(normalizeBrief({ ...brief, topics: ["a", "b", "c", "d", "e", "f"] }).topics).toHaveLength(5);
+    expect(normalizeBrief({ ...brief, topics: [] }).topics).toBeUndefined();
+    expect(normalizeBrief(brief).topics).toBeUndefined();
+  });
 });
 
 describe("generateQuestions", () => {

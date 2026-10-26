@@ -223,6 +223,22 @@ describe("buildReport", () => {
     expect(custom.missingPrompts).toEqual(["c1"]);
   });
 
+  it("gives tips for missed comparison, beginner and use-case questions", () => {
+    const missed = buildReport({
+      brief,
+      questions: [
+        { id: "q1", text: "How do the popular CRMs compare?", intent: "comparison" },
+        { id: "q2", text: "Which CRM is easiest for a beginner?", intent: "beginner" },
+        { id: "q3", text: "Which CRM can track retainers?", intent: "use-case" },
+      ],
+      answers: ["q1", "q2", "q3"].map((id) => answer(id, "claude", "1. **Close**\n2. **Pipedrive**")),
+    });
+    const tips = missed.recommendations.filter((r) => r.id.startsWith("intent-"));
+    expect(tips).toHaveLength(2);
+    expect(tips.map((r) => r.id)).toEqual(["intent-comparison", "intent-beginner"]);
+    for (const tip of tips) expect(tip.detail).toContain("Acme");
+  });
+
   it("writes audience-free advice when the audience was skipped", () => {
     const open = buildReport({
       brief: { ...brief, audience: "" },

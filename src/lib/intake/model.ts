@@ -22,8 +22,17 @@ export type IntakeClient = (
   options?: IntakeCallOptions,
 ) => Promise<unknown>;
 
-const MAX_OUTPUT_TOKENS = 400;
-const TOOL_NAME = "record_intake";
+/** One structured-output task: the JSON schema to fill, and how much room and randomness it gets. */
+export interface StructuredSpec {
+  name: string;
+  /** Anthropic tool name, when it differs from `name`. */
+  toolName?: string;
+  schema: Record<string, unknown>;
+  maxTokens: number;
+  temperature: number;
+}
+
+const INTAKE_SPEC: StructuredSpec = { name: "intake_turn", toolName: "record_intake", schema: INTAKE_JSON_SCHEMA, maxTokens: 400, temperature: 0 };
 
 /** Cheapest fast model per provider, used without reasoning, in order of preference. */
 const CANDIDATES: { provider: IntakeProvider; keys: string[]; modelVar: string; model: string }[] = [
@@ -89,12 +98,22 @@ function toGeminiSchema(schema: Schema): Schema {
   return out;
 }
 
-export const callIntakeModel: IntakeClient = async (setting, prompt, options = {}) => {
+export const callIntakeModel: IntakeClient = (setting, prompt, options = {}) => callStructuredModel(setting, prompt, INTAKE_SPEC, options);
+
+/** Asks the model for JSON matching `spec.schema`, returning the raw text or object it produced. */
+export async function callStructuredModel(
+  setting: IntakeModelSetting,
+  prompt: { system: string; user: string },
+  spec: StructuredSpec,
+  options: IntakeCallOptions = {},
+): Promise<unknown> {
   const messages = [
     { role: "system", content: prompt.system },
     { role: "user", content: prompt.user },
   ];
-  const responseFormat = { type: "json_schema", json_schema: { name: "intake_turn", strict: true, schema: INTAKE_JSON_SCHEMA } };
+  const { schema, maxTokens, temperature } = spec;
+  const toolName = spec.toolName ?? spec.name;
+  const responseFormat = { type: "json_schema", json_schema: { name: spec.name, strict: true, schema } };
 
   switch (setting.provider) {
     case "openrouter": {
@@ -105,8 +124,8 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
         messages,
         response_format: responseFormat,
         provider: { require_parameters: true },
-        temperature: 0,
-        max_tokens: MAX_OUTPUT_TOKENS,
+        temperature,
+        max_tokens: maxTokens,
       };
       // Reasoning models such as DeepSeek V4 Flash think by default and spend the whole output budget before
       // answering. Models without a reasoning switch have no host that accepts it under require_parameters (404).
@@ -120,7 +139,7 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
       const data = await postJson(
         "https://api.openai.com/v1/chat/completions",
         { authorization: `Bearer ${setting.apiKey}` },
-        { model: setting.model, messages, response_format: responseFormat, temperature: 0, max_completion_tokens: MAX_OUTPUT_TOKENS },
+        { model: setting.model, messages, response_format: responseFormat, temperature, max_completion_tokens: maxTokens },
         options,
       );
       return (asArray(data.choices)[0]?.message as Json | undefined)?.content;
@@ -131,16 +150,16 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
         { "x-api-key": setting.apiKey, "anthropic-version": "2023-06-01" },
         {
           model: setting.model,
-          max_tokens: MAX_OUTPUT_TOKENS,
-          temperature: 0,
+          max_tokens: maxTokens,
+          temperature,
           system: prompt.system,
           messages: [{ role: "user", content: prompt.user }],
-          tools: [{ name: TOOL_NAME, description: "Record how the reply was understood.", input_schema: INTAKE_JSON_SCHEMA }],
-          tool_choice: { type: "tool", name: TOOL_NAME },
+          tools: [{ name: toolName, description: "Record the structured result.", input_schema: schema }],
+          tool_choice: { type: "tool", name: toolName },
         },
         options,
       );
-      return asArray(data.content).find((block) => block.type === "tool_use" && block.name === TOOL_NAME)?.input;
+      return asArray(data.content).find((block) => block.type === "tool_use" && block.name === toolName)?.input;
     }
     case "gemini": {
       const data = await postJson(
@@ -151,9 +170,9 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
           contents: [{ role: "user", parts: [{ text: prompt.user }] }],
           generationConfig: {
             responseMimeType: "application/json",
-            responseSchema: toGeminiSchema(INTAKE_JSON_SCHEMA),
-            temperature: 0,
-            maxOutputTokens: MAX_OUTPUT_TOKENS,
+            responseSchema: toGeminiSchema(schema),
+            temperature,
+            maxOutputTokens: maxTokens,
           },
         },
         options,
@@ -162,4 +181,4 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
       return parts.map((part) => (typeof part.text === "string" ? part.text : "")).join("");
     }
   }
-};
+}

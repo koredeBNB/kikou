@@ -28,8 +28,10 @@ import type { ProviderStatus } from "@/lib/providers/config";
 import { applyTurn, emptyIntake, questionCount, toBrief, topicExamples } from "@/lib/intake/flow";
 import { requestIntake } from "@/lib/intake/request";
 import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/types";
+import { MAX_QUESTIONS } from "@/lib/sov/generate";
 import { readPlanReply } from "@/lib/sov/intake";
-import { generateQuestions, normalizeBrief } from "@/lib/sov/questions";
+import { normalizeBrief } from "@/lib/sov/questions";
+import { requestQuestions } from "@/lib/sov/request-questions";
 import { buildReport } from "@/lib/sov/report";
 import { newRunId, saveRun } from "@/lib/sov/storage";
 import { MODEL_IDS, MODEL_LABELS, type Brief, type ModelAnswer, type ModelId, type Question } from "@/lib/sov/types";
@@ -219,7 +221,9 @@ export function CheckExperience() {
     async (brief: Brief, count: number) => {
       const normalized = normalizeBrief(brief);
       setDraft(normalized);
-      const questions = generateQuestions(normalized).slice(0, count);
+      setTyping(true);
+      const { questions } = await requestQuestions(normalized, count);
+      setTyping(false);
       setPlanned(questions.map((question) => ({ question, enabled: true })));
       setStep("review");
       await say(
@@ -268,8 +272,8 @@ export function CheckExperience() {
       });
       return;
     }
-    if (planned.length >= 10) {
-      await say({ kind: "text", text: "That's the most I can ask in one check (10 questions). Untick one to make room." });
+    if (planned.length >= MAX_QUESTIONS) {
+      await say({ kind: "text", text: `That's the most I can ask in one check (${MAX_QUESTIONS} questions). Remove one to make room.` });
       return;
     }
     setPlanned((prev) => [...prev, { question: { id: `c${prev.length + 1}-${uid()}`, text: reply.value, intent: "custom" }, enabled: true }]);

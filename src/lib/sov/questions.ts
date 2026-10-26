@@ -1,3 +1,4 @@
+import { MAX_TOPICS } from "@/lib/sov/intake";
 import type { Brief, Question } from "@/lib/sov/types";
 
 function stripLead(value: string, pattern: RegExp): string {
@@ -14,12 +15,19 @@ export function normalizeBrief(brief: Brief): Brief {
     seen.add(name.toLowerCase());
     competitors.push(name);
   }
+  const topics: string[] = [];
+  for (const raw of brief.topics ?? []) {
+    const topic = raw.trim();
+    if (!topic || topics.some((t) => t.toLowerCase() === topic.toLowerCase())) continue;
+    topics.push(topic);
+  }
   return {
     product,
     category: stripLead(brief.category, /^(?:a|an|the)\s+/i).replace(/[.!]+$/, ""),
     audience: stripLead(brief.audience, /^(?:for\s+)?(?:the\s+)?/i).replace(/[.!]+$/, ""),
     competitors,
     website: brief.website?.trim() || undefined,
+    topics: topics.length ? topics.slice(0, MAX_TOPICS) : undefined,
   };
 }
 

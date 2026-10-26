@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { callIntakeModel, resolveIntakeModel, type IntakeModelSetting } from "@/lib/intake/model";
+import { callIntakeModel, callStructuredModel, resolveIntakeModel, type IntakeModelSetting } from "@/lib/intake/model";
 import { INTAKE_JSON_SCHEMA } from "@/lib/intake/schema";
+import { QUESTIONS_JSON_SCHEMA } from "@/lib/sov/generate";
 
 type FetchCall = { url: string; init: RequestInit };
 
@@ -136,6 +137,25 @@ describe("callIntakeModel", () => {
     expect(body.systemInstruction).toEqual({ parts: [{ text: prompt.system }] });
     expect(body.generationConfig).toMatchObject({ responseMimeType: "application/json", temperature: 0 });
     expect(body.generationConfig.responseSchema.properties.values.properties.product).toEqual({ type: "STRING", nullable: true });
+  });
+
+  it("sends another task's schema, name, temperature and output budget when asked", async () => {
+    const spec = { name: "buyer_questions", schema: QUESTIONS_JSON_SCHEMA, maxTokens: 2000, temperature: 0.8 };
+    const { impl, calls } = fakeFetch({ choices: [{ message: { content: '{"questions":["Which CRM?"]}' } }] });
+    expect(await callStructuredModel(setting({}), prompt, spec, { fetchImpl: impl })).toBe('{"questions":["Which CRM?"]}');
+    expect(bodyOf(calls[0])).toMatchObject({
+      response_format: { type: "json_schema", json_schema: { name: "buyer_questions", strict: true, schema: QUESTIONS_JSON_SCHEMA } },
+      reasoning: { effort: "none" },
+      max_tokens: 2000,
+      temperature: 0.8,
+    });
+
+    const anthropic = fakeFetch({ content: [{ type: "tool_use", name: "buyer_questions", input: { questions: ["Which CRM?"] } }] });
+    const raw = await callStructuredModel(setting({ provider: "anthropic", apiKey: "ak", model: "claude-haiku-4-5", baseUrl: undefined }), prompt, spec, {
+      fetchImpl: anthropic.impl,
+    });
+    expect(raw).toEqual({ questions: ["Which CRM?"] });
+    expect(bodyOf(anthropic.calls[0])).toMatchObject({ max_tokens: 2000, tool_choice: { name: "buyer_questions" } });
   });
 
   it("throws on an error status without leaking the key", async () => {
