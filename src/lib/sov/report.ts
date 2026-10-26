@@ -19,10 +19,25 @@ import {
   type Report,
 } from "@/lib/sov/types";
 
-export function analyzeAnswer(answer: ModelAnswer, brands: string[], category?: string): AnalyzedAnswer {
+export interface AnalyzeOptions {
+  category?: string;
+  /** Brands named in the question were prompted, so they are not credited for that answer. */
+  questionText?: string;
+}
+
+export function analyzeAnswer(
+  answer: ModelAnswer,
+  brands: string[],
+  { category, questionText }: AnalyzeOptions = {},
+): AnalyzedAnswer {
+  const prompted = new Set(questionText ? findMentions(questionText, brands, category).map((m) => m.brand) : []);
   return {
     ...answer,
-    mentions: findMentions(answer.text, brands, category),
+    mentions: findMentions(
+      answer.text,
+      brands.filter((b) => !prompted.has(b)),
+      category,
+    ),
     citationList: collectCitations(answer.text, answer.citations),
   };
 }
@@ -63,7 +78,10 @@ export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 
     { minAnswers: discoverMinAnswers },
   );
   const allBrands = [product, ...competitors, ...discovered];
-  const analyzed = answers.map((a) => analyzeAnswer(a, allBrands, brief.category));
+  const questionText = new Map(questions.map((q) => [q.id, q.text]));
+  const analyzed = answers.map((a) =>
+    analyzeAnswer(a, allBrands, { category: brief.category, questionText: questionText.get(a.questionId) }),
+  );
   const models = MODEL_IDS.filter((m) => analyzed.some((a) => a.model === m));
 
   const answersPerModel = Object.fromEntries(

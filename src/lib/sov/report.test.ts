@@ -12,7 +12,7 @@ const brief: Brief = {
 
 const questions: Question[] = [
   { id: "q1", text: "What is the best CRM for small agencies?", intent: "best-for" },
-  { id: "q2", text: "What are the best alternatives to Pipedrive?", intent: "alternatives" },
+  { id: "q2", text: "Which CRM do agencies switch to when they outgrow spreadsheets?", intent: "alternatives" },
 ];
 
 function answer(questionId: string, model: ModelAnswer["model"], text: string, citations: string[] = []): ModelAnswer {
@@ -38,12 +38,25 @@ describe("analyzeAnswer", () => {
     const analyzed = analyzeAnswer(
       answer("q1", "gemini", "**Acme** leads, then Close. Source: https://www.capterra.com/crm", ["https://g2.com/a"]),
       ["Acme", "Close"],
+      {},
     );
     expect(analyzed.mentions.map((m) => [m.brand, m.rank])).toEqual([
       ["Acme", 1],
       ["Close", 2],
     ]);
     expect(analyzed.citationList.map((c) => c.domain)).toEqual(["g2.com", "capterra.com"]);
+  });
+
+  it("ignores brands that the question itself names", () => {
+    const analyzed = analyzeAnswer(
+      answer("q9", "claude", "If Pipedrive isn't working out:\n1. **Close**\n2. **Acme**"),
+      ["Acme", "Pipedrive", "Close"],
+      { questionText: "What are the best alternatives to Pipedrive?" },
+    );
+    expect(analyzed.mentions.map((m) => [m.brand, m.rank])).toEqual([
+      ["Close", 1],
+      ["Acme", 2],
+    ]);
   });
 });
 
@@ -143,6 +156,7 @@ describe("buildReport", () => {
       expect(rec.title.length).toBeGreaterThan(0);
       expect(rec.detail.length).toBeGreaterThan(0);
     }
+    expect(report.recommendations.length).toBeLessThanOrEqual(6);
   });
 
   it("handles a run where nobody gets mentioned", () => {
@@ -170,5 +184,17 @@ describe("buildReport", () => {
     });
     expect(withExtra.brands.map((b) => b.brand)).toContain("Freshsales");
     expect(withExtra.brands.find((b) => b.brand === "Freshsales")?.isTrackedCompetitor).toBe(false);
+  });
+
+  it("does not credit a brand for answers to questions that name it", () => {
+    const named = buildReport({
+      brief,
+      questions: [...questions, { id: "q3", text: "What are the best alternatives to Close?", intent: "switching" }],
+      answers: [...answers, answer("q3", "chatgpt", "Close is fine, but try:\n1. **Acme**\n2. **Pipedrive**")],
+    });
+    const close = named.brands.find((b) => b.brand === "Close")!;
+    expect(close.mentions).toBe(2);
+    expect(named.product.mentions).toBe(3);
+    expect(named.prompts.find((p) => p.question.id === "q3")?.cells.chatgpt).toMatchObject({ rank: 1 });
   });
 });

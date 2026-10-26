@@ -14,6 +14,8 @@ const pct = (value: number) => `${Math.round(value * 100)}%`;
 const quote = (text: string) => `“${text}”`;
 const PRIORITY_ORDER: Record<RecommendationPriority, number> = { high: 0, medium: 1, low: 2 };
 const RETRIEVAL_MODELS = new Set(["perplexity", "gemini"]);
+const MAX_RECOMMENDATIONS = 6;
+const MAX_INTENT_TIPS = 2;
 
 function intentAdvice(intent: QuestionIntent, report: ReportWithoutRecommendations): Omit<Recommendation, "id"> {
   const { product, category, audience } = report.brief;
@@ -103,9 +105,11 @@ export function buildRecommendations(report: ReportWithoutRecommendations): Reco
   }
 
   const intents = [...new Set(report.questions.map((q) => q.intent))];
-  for (const intent of intents) {
+  const missedIntents = intents.filter((intent) => {
     const rows = report.prompts.filter((p) => p.question.intent === intent && p.answers > 0);
-    if (rows.length === 0 || rows.some((p) => p.productMentions > 0)) continue;
+    return rows.length > 0 && rows.every((p) => p.productMentions === 0);
+  });
+  for (const intent of missedIntents.slice(0, MAX_INTENT_TIPS)) {
     recs.push({ id: `intent-${intent}`, ...intentAdvice(intent, report) });
   }
 
@@ -197,5 +201,6 @@ export function buildRecommendations(report: ReportWithoutRecommendations): Reco
   return recs
     .map((rec, index) => ({ rec, index }))
     .sort((a, b) => PRIORITY_ORDER[a.rec.priority] - PRIORITY_ORDER[b.rec.priority] || a.index - b.index)
+    .slice(0, MAX_RECOMMENDATIONS)
     .map(({ rec }) => rec);
 }
