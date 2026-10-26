@@ -104,7 +104,7 @@ const SENTENCE_WORDS = new Set([
 ]);
 
 /** A short name, not a sentence. Title-cased names may contain common words ("You Need A Budget"). */
-function looksLikeName(value: string): boolean {
+export function looksLikeName(value: string): boolean {
   const parts = words(value);
   if (parts.length === 0 || parts.length > 4 || value.length > 40 || !/[\p{L}\p{N}]/u.test(value)) return false;
   if (isNonAnswer(value)) return false;

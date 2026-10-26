@@ -50,7 +50,7 @@ export const PROVIDERS: Record<ModelId, ProviderDefinition> = {
   },
 };
 
-const truthy = (value: string | undefined) => /^(1|true|yes|on)$/i.test(value?.trim() ?? "");
+export const truthy = (value: string | undefined) => /^(1|true|yes|on)$/i.test(value?.trim() ?? "");
 
 export function resolveProviders(env: Env): Record<ModelId, ProviderSetting> {
   const forceMock = truthy(env.SOV_FORCE_MOCK);
