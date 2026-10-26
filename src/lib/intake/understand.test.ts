@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { applyTurn, emptyIntake } from "@/lib/intake/flow";
 import type { IntakeClient } from "@/lib/intake/model";
 import { MAX_REPLY_CHARS, buildIntakePrompt } from "@/lib/intake/prompt";
-import { understandReply } from "@/lib/intake/understand";
+import { CLIENT_TIMEOUT_MS } from "@/lib/intake/request";
+import { intakeTimeout, understandReply } from "@/lib/intake/understand";
 
 const env = { OPENROUTER_API_KEY: "or-key" };
 const fullReply = "It's Fernly, a plant care app for new plant parents, site's fernly.app";
@@ -97,6 +98,28 @@ describe("understandReply", () => {
     expect(result).toMatchObject({ source: "rules", reason: "timeout", turn: { intent: "answer", values: { product: "Acme" } } });
     expect(Date.now() - started).toBeLessThan(1000);
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe("intakeTimeout", () => {
+  it("defaults to 6 seconds, overridable but always inside the browser's wait", () => {
+    expect(intakeTimeout({})).toBe(6000);
+    expect(intakeTimeout({ SOV_INTAKE_TIMEOUT_MS: "2500" })).toBe(2500);
+    expect(intakeTimeout({ SOV_INTAKE_TIMEOUT_MS: "soon" })).toBe(6000);
+    expect(intakeTimeout({ SOV_INTAKE_TIMEOUT_MS: "0" })).toBe(6000);
+    expect(intakeTimeout({ SOV_INTAKE_TIMEOUT_MS: "60000" })).toBeLessThan(CLIENT_TIMEOUT_MS);
+    expect(intakeTimeout({})).toBeLessThan(CLIENT_TIMEOUT_MS);
+  });
+
+  it("applies the env timeout when reading a reply", async () => {
+    const client: IntakeClient = () => new Promise(() => {});
+    const started = Date.now();
+    const result = await understandReply(
+      { field: "product", reply: "Acme", state: emptyIntake() },
+      { env: { ...env, SOV_INTAKE_TIMEOUT_MS: "40" }, client },
+    );
+    expect(result).toMatchObject({ source: "rules", reason: "timeout" });
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });
 

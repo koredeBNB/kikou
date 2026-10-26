@@ -5,7 +5,15 @@ import { parseIntakeTurn } from "@/lib/intake/schema";
 import type { FallbackReason, IntakeResult } from "@/lib/intake/types";
 import type { Env } from "@/lib/providers/config";
 
-export const INTAKE_TIMEOUT_MS = 4000;
+export const INTAKE_TIMEOUT_MS = 6000;
+/** Below the browser's own wait (CLIENT_TIMEOUT_MS), so the server can still answer with the rules. */
+const MAX_TIMEOUT_MS = 8000;
+
+/** `SOV_INTAKE_TIMEOUT_MS` overrides the default. */
+export function intakeTimeout(env: Env): number {
+  const ms = Number(env.SOV_INTAKE_TIMEOUT_MS);
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_TIMEOUT_MS) : INTAKE_TIMEOUT_MS;
+}
 
 interface UnderstandOptions {
   env: Env;
@@ -33,7 +41,7 @@ export async function understandReply(input: IntakeInput, options: UnderstandOpt
     timer = setTimeout(() => {
       abort.abort();
       reject(new Timeout());
-    }, options.timeoutMs ?? INTAKE_TIMEOUT_MS);
+    }, options.timeoutMs ?? intakeTimeout(options.env));
   });
 
   try {

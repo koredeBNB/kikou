@@ -7,8 +7,8 @@ const MAX_REPLY = 1000;
 const MAX_VALUE = 120;
 const MAX_COMPETITORS = 8;
 const REASONS: FallbackReason[] = ["no-model", "forced", "timeout", "error", "invalid"];
-/** A little longer than the server's model timeout, so the server can answer with its own fallback first. */
-const CLIENT_TIMEOUT_MS = 6000;
+/** Longer than the server's longest model timeout, so the server can answer with its own fallback first. */
+export const CLIENT_TIMEOUT_MS = 9000;
 
 const str = (value: unknown, max = MAX_VALUE) => (typeof value === "string" ? value.trim().slice(0, max) : "");
 const isField = (value: unknown): value is IntakeField => INTAKE_FIELDS.includes(value as IntakeField);

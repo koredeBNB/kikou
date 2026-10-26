@@ -60,7 +60,7 @@ The model only reads and phrases. It never touches the questions or the scoring:
 - The flow is fixed. Pip only uses the model's message when it asks for the step the app picks next. Messages with links or markup are dropped.
 - Replies are capped at 500 characters and passed as quoted data, with instructions to ignore any requests inside them.
 
-With no key, after a 4 second timeout, on an error, or when the output doesn't validate, Pip falls back to the rule-based parser in `src/lib/sov/intake.ts`, so demo mode works the same.
+With no key, after a 6 second timeout (`SOV_INTAKE_TIMEOUT_MS`, up to 8000), on an error, or when the output doesn't validate, Pip falls back to the rule-based parser in `src/lib/sov/intake.ts`, so demo mode works the same.
 
 | Setting                   | Default                                                         |
 | ------------------------- | --------------------------------------------------------------- |
