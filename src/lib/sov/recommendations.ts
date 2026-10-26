@@ -22,6 +22,7 @@ function intentAdvice(
   report: ReportWithoutRecommendations,
 ): Omit<Recommendation, "id"> {
   const { product, category, audience } = report.brief;
+  const forAudience = audience ? ` for ${audience}` : "";
   const rival = report.gaps[0]?.competitor ?? report.brief.competitors[0] ?? "your biggest rival";
   const topDomains = report.domains
     .filter((d) => !d.isOwn)
@@ -32,8 +33,8 @@ function intentAdvice(
   switch (intent) {
     case "best-for":
       return {
-        title: `Win the “best ${category} for ${audience}” answer`,
-        detail: `No model picked ${product} when asked for the best ${category} for ${audience}. Publish a page aimed squarely at that use case, with customer proof, concrete numbers and a plain “who it's for” line that models can quote.`,
+        title: `Win the “best ${category}${forAudience}” answer`,
+        detail: `No model picked ${product} when asked for the best ${category}${forAudience}. Publish a page aimed squarely at that use case, with customer proof, concrete numbers and a plain “who it's for” line that models can quote.`,
         priority: "high",
         area: "positioning",
       };
@@ -161,7 +162,7 @@ export function buildRecommendations(report: ReportWithoutRecommendations): Reco
     recs.push({
       id: "rank",
       title: "Move up the shortlist",
-      detail: `When ${product} is mentioned it sits at #${stats.avgRank.toFixed(1)} on average. Lead every page with one memorable differentiator for ${brief.audience} so models put you first, not as an afterthought.`,
+      detail: `When ${product} is mentioned it sits at #${stats.avgRank.toFixed(1)} on average. Lead every page with one memorable differentiator${brief.audience ? ` for ${brief.audience}` : ""} so models put you first, not as an afterthought.`,
       priority: "medium",
       area: "positioning",
     });

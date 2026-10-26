@@ -19,6 +19,17 @@ describe("mockAnswer", () => {
     expect(mockAnswer(brief, questions[0], "claude")).toEqual(mockAnswer(brief, questions[0], "claude"));
   });
 
+  it("writes clean blurbs when the audience was skipped", () => {
+    const open = { ...brief, audience: "" };
+    for (const q of generateQuestions(open, { year: 2026 })) {
+      for (const m of MODEL_IDS) {
+        const text = mockAnswer(open, q, m).text;
+        expect(text).not.toMatch(/ {2}|by for|for its .*for ,| for\./);
+        expect(text).not.toContain("{audience}");
+      }
+    }
+  });
+
   it("varies between models", () => {
     expect(mockAnswer(brief, questions[0], "claude").text).not.toBe(mockAnswer(brief, questions[0], "chatgpt").text);
   });

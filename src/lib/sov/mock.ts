@@ -132,12 +132,12 @@ const OUTROS: Record<ModelId, string[]> = {
 
 function citationPool(brief: Brief, random: () => number): string[] {
   const cat = slug(brief.category);
-  const aud = slug(brief.audience);
+  const aud = slug(brief.audience).replace(/-/g, "_");
   const thread = Math.floor(random() * 900000 + 100000).toString(36);
   return [
     `https://www.g2.com/categories/${cat}`,
     `https://www.capterra.com/${cat}-software/`,
-    `https://www.reddit.com/r/${cat.replace(/-/g, "")}/comments/${thread}/best_${cat.replace(/-/g, "_")}_for_${aud.replace(/-/g, "_")}/`,
+    `https://www.reddit.com/r/${cat.replace(/-/g, "")}/comments/${thread}/best_${cat.replace(/-/g, "_")}${aud ? `_for_${aud}` : ""}/`,
     `https://www.forbes.com/advisor/business/software/best-${cat}/`,
     `https://www.techradar.com/best/best-${cat}`,
     `https://zapier.com/blog/best-${cat}/`,
@@ -165,7 +165,7 @@ function blurb(random: () => number, isProduct: boolean, audience: string): stri
       : roll < 0.75
         ? NEUTRAL_BLURBS
         : CAVEAT_BLURBS;
-  const text = pick(random, set).replace("{audience}", audience);
+  const text = pick(random, set).replace("{audience}", audience || "users");
   return text[0].toUpperCase() + text.slice(1);
 }
 

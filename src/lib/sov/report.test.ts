@@ -196,6 +196,17 @@ describe("buildReport", () => {
     expect(custom.missingPrompts).toEqual(["c1"]);
   });
 
+  it("writes audience-free advice when the audience was skipped", () => {
+    const open = buildReport({
+      brief: { ...brief, audience: "" },
+      questions: [{ id: "q1", text: "What's the best CRM?", intent: "best-for" }],
+      answers: [answer("q1", "claude", "1. **Close**\n2. **Pipedrive**"), answer("q1", "gemini", "1. **Pipedrive**\n2. **Close**")],
+    });
+    const bestFor = open.recommendations.find((r) => r.id === "intent-best-for");
+    expect(bestFor?.title).toBe("Win the “best CRM” answer");
+    for (const rec of open.recommendations) expect(`${rec.title} ${rec.detail}`).not.toMatch(/for ”| for \.| for so | {2}/);
+  });
+
   it("does not credit a brand for answers to questions that name it", () => {
     const named = buildReport({
       brief,

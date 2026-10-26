@@ -57,7 +57,8 @@ export function ReportHeader({ run, report }: { run: StoredRun; report: Report }
         <p className="text-sm font-bold text-meadow-700">Share-of-voice report</p>
         <h1 className="mt-1 text-4xl font-semibold text-ink sm:text-5xl">{brief.product}</h1>
         <p className="mt-2 text-base text-ink-soft">
-          {brief.category} for {brief.audience}
+          {brief.category}
+          {brief.audience && <> for {brief.audience}</>}
           {brief.competitors.length > 0 && <> · tracking {listJoin(brief.competitors)}</>}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">

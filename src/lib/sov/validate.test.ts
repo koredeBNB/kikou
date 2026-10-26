@@ -15,6 +15,11 @@ describe("validateCheckRequest", () => {
     expect(result.value.brief.competitors).toEqual(["Close"]);
   });
 
+  it("keeps a skipped audience empty instead of inventing one", () => {
+    const result = validateCheckRequest({ ...valid, brief: { ...valid.brief, audience: "" } });
+    expect(result.ok && result.value.brief.audience).toBe("");
+  });
+
   it("requires a product, a category and at least one question", () => {
     expect(validateCheckRequest({ ...valid, brief: { category: "CRM" } })).toMatchObject({ ok: false });
     expect(validateCheckRequest({ ...valid, brief: { product: "Acme" } })).toMatchObject({ ok: false });

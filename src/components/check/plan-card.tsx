@@ -46,7 +46,7 @@ export function PlanCard({
       <div className="flex flex-wrap gap-1.5 text-sm">
         <Badge variant="meadow" className="h-6 px-2.5">{brief.product}</Badge>
         <Badge variant="sky" className="h-6 px-2.5">{brief.category}</Badge>
-        <Badge variant="lavender" className="h-6 px-2.5">for {brief.audience}</Badge>
+        {brief.audience && <Badge variant="lavender" className="h-6 px-2.5">for {brief.audience}</Badge>}
         {brief.competitors.map((c) => (
           <Badge key={c} variant="outline" className="h-6 bg-white px-2.5">
             vs {c}

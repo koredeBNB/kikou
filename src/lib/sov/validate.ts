@@ -44,7 +44,7 @@ export function validateCheckRequest(input: unknown): ValidationResult {
       brief: {
         product,
         category,
-        audience: str(brief.audience) || "most teams",
+        audience: str(brief.audience),
         competitors,
         website: str(brief.website) || undefined,
       },

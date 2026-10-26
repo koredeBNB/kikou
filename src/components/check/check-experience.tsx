@@ -25,8 +25,7 @@ import { Button } from "@/components/ui/button";
 import { useCheckRun, type RunState } from "@/hooks/use-check-run";
 import { listJoin, ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
-import { siteDomain } from "@/lib/sov/citations";
-import { parseCompetitors, parseIntro } from "@/lib/sov/intake";
+import { readAudience, readCategory, readCompetitors, readPlanReply, readProduct, readWebsite } from "@/lib/sov/intake";
 import { generateQuestions, normalizeBrief } from "@/lib/sov/questions";
 import { buildReport } from "@/lib/sov/report";
 import { newRunId, saveRun } from "@/lib/sov/storage";
@@ -68,7 +67,6 @@ const PLACEHOLDERS: Record<Step, string> = {
   done: "Check another product…",
 };
 
-const SKIP = /^(skip|no|none|nope|n\/a|-)$/i;
 const EMPTY_BRIEF: Brief = { product: "", category: "", audience: "", competitors: [] };
 const ALL_MODELS = Object.fromEntries(MODEL_IDS.map((m) => [m, true])) as Record<ModelId, boolean>;
 
@@ -99,6 +97,8 @@ function nextMissing(draft: Brief): Step {
   return "competitors";
 }
 
+const withArticle = (noun: string) => `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
+
 function guessDomain(product: string): string | null {
   const slug = product.toLowerCase().replace(/[^a-z0-9]/g, "");
   return slug.length >= 3 && slug.length <= 20 ? `${slug}.com` : null;
@@ -118,6 +118,7 @@ export function CheckExperience() {
   const [openAnswer, setOpenAnswer] = useState<ModelAnswer | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const runIdRef = useRef<string | null>(null);
+  const nudgedRef = useRef(new Set<Step>());
 
   useEffect(() => {
     let cancelled = false;
@@ -228,13 +229,31 @@ export function CheckExperience() {
       text: `Which competitors should I keep an eye on? List a few, separated by commas, or skip and I'll spot them in the answers.`,
     }).then(() => setStep("competitors"));
 
+  /** True the first time a step gets an answer Pip can't use, so Pip asks once before moving on. */
+  const firstNudge = (at: Step) => {
+    if (nudgedRef.current.has(at)) return false;
+    nudgedRef.current.add(at);
+    return true;
+  };
+
+  const askAudience = (text: string) =>
+    say({ kind: "text", mood: "wave", text: `${text} Who is it for? Describe your typical buyer, or skip if it's for everyone.` }).then(() =>
+      setStep("audience"),
+    );
+
   const handleProduct = async (text: string) => {
-    const fields = parseIntro(text);
-    if (!fields.product) {
-      await say({ kind: "text", text: "What's your product called?" });
+    const reply = readProduct(text);
+    if (reply.kind !== "ok") {
+      await say({
+        kind: "text",
+        text:
+          reply.kind === "skip"
+            ? "Let's start with the name. What's your product called? A working name is fine."
+            : "I couldn't spot a product name in that. What's it called? Just the name works, like “Acme”, or add what it is: “Acme, a CRM for small agencies”.",
+      });
       return;
     }
-    const next = { ...EMPTY_BRIEF, ...fields };
+    const next = { ...EMPTY_BRIEF, ...reply.value };
     setDraft(next);
     const missing = nextMissing(next);
     if (missing === "category") {
@@ -245,81 +264,121 @@ export function CheckExperience() {
         text: `Lovely to meet **${next.product}**! What kind of product is it? A short category works best, like “CRM” or “plant care app”.`,
       });
     } else if (missing === "audience") {
-      setStep("audience");
-      await say({
-        kind: "text",
-        mood: "wave",
-        text: `**${next.product}**, a ${next.category}. Lovely! Who is it for? Describe your typical buyer or use case.`,
-      });
+      await askAudience(`**${next.product}**, ${withArticle(next.category)}. Lovely!`);
     } else {
-      await say({ kind: "text", mood: "happy", text: `Lovely: **${next.product}**, a ${next.category} for ${next.audience}.` });
+      await say({ kind: "text", mood: "happy", text: `Lovely: **${next.product}**, ${withArticle(next.category)} for ${next.audience}.` });
       await askCompetitors();
     }
   };
 
   const handleCategory = async (text: string) => {
-    const [category, audience] = text.split(/\s+for\s+/i);
-    const next = {
-      ...draft,
-      category: category.replace(/^(?:it'?s|it is)?\s*(?:a|an|the)\s+/i, "").replace(/[.!]+$/, "").trim(),
-      audience: audience?.replace(/[.!]+$/, "").trim() || draft.audience,
-    };
-    setDraft(next);
-    if (!next.audience) {
-      setStep("audience");
-      await say({ kind: "text", text: `A ${next.category}, got it. Who is it for? Describe your typical buyer or use case.` });
-    } else {
-      await askCompetitors();
+    const reply = readCategory(text);
+    if (reply.kind !== "ok") {
+      await say({
+        kind: "text",
+        text:
+          reply.kind === "skip"
+            ? "No worries. Think of what a buyer would type into a search box, like “CRM”, “plant care app” or “running shoes”. What would yours be?"
+            : "Could you say that in a few words? Something like “plant care app” or “CRM” works best.",
+      });
+      return;
     }
+    const next = { ...draft, category: reply.value.category, audience: reply.value.audience ?? draft.audience };
+    setDraft(next);
+    if (next.audience) await askCompetitors();
+    else await askAudience(`Got it, ${withArticle(next.category)}.`);
   };
 
   const handleAudience = async (text: string) => {
-    const next = { ...draft, audience: text.replace(/^(?:it'?s\s+)?for\s+/i, "").replace(/[.!]+$/, "").trim() };
-    setDraft(next);
+    const reply = readAudience(text);
+    if (reply.kind === "unclear" && firstNudge("audience")) {
+      await say({ kind: "text", text: "Could you sum that up in a few words? Something like “small agencies” or “new plant parents”." });
+      return;
+    }
+    if (reply.kind === "ok") {
+      setDraft({ ...draft, audience: reply.value });
+    } else {
+      setDraft({ ...draft, audience: "" });
+      await say({ kind: "text", text: "No problem, I'll keep the questions general." });
+    }
     await askCompetitors();
   };
 
   const handleCompetitors = async (text: string) => {
-    const competitors = parseCompetitors(text);
+    const reply = readCompetitors(text);
+    if (reply.kind === "unclear" && firstNudge("competitors")) {
+      await say({
+        kind: "text",
+        text: "I couldn't pick out any brand names there. Could you list them, like “HubSpot, Pipedrive”? Or skip and I'll spot them in the answers.",
+      });
+      return;
+    }
+    const competitors = reply.kind === "ok" ? reply.value : [];
     const next = { ...draft, competitors };
     setDraft(next);
     await say({
       kind: "text",
-      text: competitors.length ? `Noted. I'll watch ${listJoin(competitors)}.` : "No problem, I'll spot rivals in the answers.",
+      text:
+        reply.kind === "ok"
+          ? `Noted. I'll watch ${listJoin(competitors)}${reply.ignored.length ? " and spot any others in the answers" : ""}.`
+          : reply.kind === "skip"
+            ? "No problem, I'll spot your competitors in the answers."
+            : "I still couldn't pick out any brand names, so I'll spot your competitors in the answers instead.",
     });
     if (next.website) {
       await goReview(next);
       return;
     }
     setStep("website");
-    await say({ kind: "text", text: "Last one: what's your website? It helps me notice when assistants cite you." });
+    await say({ kind: "text", text: "Last one: what's your website? It helps me notice when assistants cite you. No site yet? Just skip." });
   };
 
   const handleWebsite = async (text: string) => {
-    if (SKIP.test(text.trim())) {
-      await goReview(draft);
+    const reply = readWebsite(text);
+    if (reply.kind === "ok") {
+      await goReview({ ...draft, website: reply.value });
       return;
     }
-    const domain = siteDomain(text);
-    if (!domain) {
-      await say({ kind: "text", text: "That doesn't look like a web address. Try something like acme.com, or skip." });
+    if (reply.kind === "unclear" && firstNudge("website")) {
+      await say({ kind: "text", text: "I couldn't spot a web address in that. Try something like acme.com, or skip." });
       return;
     }
-    await goReview({ ...draft, website: domain });
+    await say({ kind: "text", text: "No problem, we'll go without it." });
+    await goReview(draft);
   };
 
   const handleReview = async (text: string) => {
+    const reply = readPlanReply(text);
+    if (reply.kind === "start") {
+      if (enabledQuestions.length === 0 || selectedModels.length === 0) {
+        await say({ kind: "text", text: "Tick at least one question and one assistant on the plan, then we're off." });
+        return;
+      }
+      await startRun({ echo: false });
+      return;
+    }
+    if (reply.kind !== "ok") {
+      await say({
+        kind: "text",
+        text:
+          reply.kind === "skip"
+            ? "No worries. Press **Ask** on the plan whenever you're ready."
+            : `Try a full question a buyer might ask, like “Which ${draft.category} is easiest to set up?”, or press **Ask** on the plan to start.`,
+      });
+      return;
+    }
     if (planned.length >= 10) {
       await say({ kind: "text", text: "That's the most I can ask in one check (10 questions). Untick one to make room." });
       return;
     }
-    setPlanned((prev) => [...prev, { question: { id: `c${prev.length + 1}-${uid()}`, text, intent: "custom" }, enabled: true }]);
+    setPlanned((prev) => [...prev, { question: { id: `c${prev.length + 1}-${uid()}`, text: reply.value, intent: "custom" }, enabled: true }]);
     await say({ kind: "text", text: "Added to the list! Anything else, or shall we start?" });
   };
 
   const restart = useCallback(() => {
     resetRun();
     runIdRef.current = null;
+    nudgedRef.current.clear();
     setRunCtx(null);
     setMessages([]);
     setDraft(EMPTY_BRIEF);
@@ -336,6 +395,7 @@ export function CheckExperience() {
     if (step === "done") {
       resetRun();
       runIdRef.current = null;
+      nudgedRef.current.clear();
       setRunCtx(null);
       setPlanned([]);
       setMessages([{ id: uid(), role: "user", text }]);
@@ -360,14 +420,14 @@ export function CheckExperience() {
     }
   };
 
-  const startRun = async () => {
+  const startRun = async ({ echo = true }: { echo?: boolean } = {}) => {
     if (enabledQuestions.length === 0 || selectedModels.length === 0) return;
     const id = newRunId();
     const brief = normalizeBrief(draft);
     runIdRef.current = id;
     setRunCtx({ id, brief, questions: enabledQuestions, models: selectedModels });
     setStep("running");
-    append({ id: uid(), role: "user", text: "Let's go!" });
+    if (echo) append({ id: uid(), role: "user", text: "Let's go!" });
     await say({ kind: "text", mood: "thinking", text: "Off I go! I'll drop each answer in as it lands." }, { kind: "run" });
     void start({ brief, questions: enabledQuestions, models: selectedModels });
   };
@@ -378,7 +438,7 @@ export function CheckExperience() {
       case "category":
         return ["CRM", "project management tool", "AI writing assistant", "accounting software"];
       case "audience":
-        return ["small businesses", "startups", "enterprise teams", "freelancers"];
+        return ["small businesses", "startups", "enterprise teams", "freelancers", "Skip"];
       case "competitors":
         return ["Skip"];
       case "website": {
@@ -415,7 +475,7 @@ export function CheckExperience() {
             onToggleQuestion={(id) => setPlanned((prev) => prev.map((p) => (p.question.id === id ? { ...p, enabled: !p.enabled } : p)))}
             onRemoveQuestion={(id) => setPlanned((prev) => prev.filter((p) => p.question.id !== id))}
             onToggleModel={(id) => setModels((prev) => ({ ...prev, [id]: !prev[id] }))}
-            onStart={startRun}
+            onStart={() => startRun()}
           />
         </PipMessage>
       );
