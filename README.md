@@ -23,6 +23,8 @@ pnpm dev
 
 Open [http://localhost:47321](http://localhost:47321). The sample report lives at [/report/demo](http://localhost:47321/report/demo).
 
+Locally you don't need Redis: run state, the daily budget and rate limits are kept in the server process and reset when it restarts. To use a real Redis locally (for example the one your Vercel project uses), put its REST URL and token in `.env.local` as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, or pull them with `vercel env pull .env.local`.
+
 ## Connect real assistants
 
 Copy `.env.example` to `.env.local` and add any keys you have, then restart `pnpm dev`. Each assistant switches to live answers on its own. The rest stay in demo mode, and the report labels which is which.
@@ -79,13 +81,44 @@ Broad checks of up to 6 questions use the built-in set. Anything bigger goes to 
 
 The estimate comes from the average cost and time of real answers from each assistant, with web search on or off (`ANSWER_RATES` in `src/lib/sov/estimate.ts`). It depends only on the number of questions, the assistants you tick and the web search switch, and updates as you change them. Nothing runs until you press **Ask** or say "go ahead".
 
-Big checks run each assistant's questions a few at a time (5 by default). Rate limits and server errors are retried up to three times, honouring `Retry-After`, and a timed-out answer gets one more try. Answers that still fail are listed in the chat and the report and left out of every number. The stream sends a heartbeat every 15 seconds so proxies keep long checks open.
+Big checks run each assistant's questions a few at a time (5 by default). Rate limits and server errors are retried up to three times, honouring `Retry-After`, and a timed-out answer gets one more try. Answers that still fail are listed in the chat and the report and left out of every number.
+
+## How a check runs
+
+No request runs for the whole check, so a 100-question check works on serverless hosts:
+
+1. `POST /api/check` checks the plan, the visitor's rate limit and today's budget, saves the run, holds its estimated cost and returns a run id.
+2. The browser then asks `POST /api/check/[id]/batch` for up to 5 answers at a time for one assistant, keeping 5 in flight per assistant. Each batch streams its answers back as they land, with a heartbeat every 15 seconds, and stops answering after 100 seconds (`maxDuration` is 120). Most batches take 5 to 30 seconds.
+3. `POST /api/check/[id]/finish` gives back whatever is left of the hold. If the tab closes, the hold lapses on its own 10 minutes after the last batch.
+
+Every answer is claimed before it's asked and saved once, so a batch that's sent twice (after a dropped connection, say) gets the saved answers back and isn't charged again. A dropped batch is retried once; anything still missing is listed as a failed answer. The finished report is built and saved in the browser, as before; the server keeps run state for 6 hours.
+
+Run state, the daily spend ledger and rate-limit counters live in Redis (Upstash, over its REST API) when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, or the `KV_REST_API_URL` and `KV_REST_API_TOKEN` that the Vercel Marketplace sets, are present. Each change is one atomic Lua script, so many function instances can work on one check at once. Without them, the app uses an in-process store, which is fine for one local server. On Vercel without Redis, checks are refused with a clear message, because each request can land on a different instance. The store lives in `src/lib/store/`.
 
 ## Sharing it with a password
 
 Set `SOV_BASIC_AUTH_USER` and `SOV_BASIC_AUTH_PASSWORD` to put the whole app behind HTTP basic auth: every page, API route and asset (`src/proxy.ts`). With either one unset, there's no password. Use a long random password, for example `openssl rand -base64 32`, because anyone with it can run checks on your keys.
 
-Spending is capped per UTC day across everyone using the app: $20 by default, or `SOV_MAX_SPEND_PER_DAY` in dollars (`off` removes the cap). Each check reserves its estimated cost when it starts and books what OpenRouter actually charged when it ends (`usage.cost` on every answer). A check whose estimate is more than what's left gets a 429, and Pip says how much is left and when it resets. The ledger is kept in memory, so it starts again when the server restarts. Demo answers are free and never blocked.
+Spending is capped per UTC day across everyone using the app: $20 by default, or `SOV_MAX_SPEND_PER_DAY` in dollars (`off` removes the cap). Each check holds its estimated cost when it starts, and every answer books what OpenRouter actually charged (`usage.cost`) and draws the hold down by the same amount. A check whose estimate is more than what's left, counting the holds of checks still running, gets a 429, and Pip says how much is left and when it resets. Demo answers are free and never blocked.
+
+Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour) and intake replies (150 an hour) have their own limits; over those, Pip quietly falls back to templates and the built-in parser. `SOV_CHECKS_PER_HOUR=off` removes all three limits.
+
+## Deploy to Vercel
+
+1. Import the repository in Vercel (framework: Next.js; the defaults work). Pushes to `main` deploy to production, and other branches get preview deployments.
+2. Add Redis: in the project, open **Storage**, choose **Upstash for Redis** from the Marketplace and connect it to Production and Preview. It sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`. From the CLI: `vercel integration add upstash`.
+3. Add environment variables for Production and Preview, as sensitive values where offered:
+
+   | Variable | Value |
+   | --- | --- |
+   | `OPENROUTER_API_KEY` | Your OpenRouter key |
+   | `SOV_BASIC_AUTH_USER`, `SOV_BASIC_AUTH_PASSWORD` | The shared login, e.g. a password from `openssl rand -base64 24` |
+   | `SOV_MAX_SPEND_PER_DAY` | Daily cap in dollars (20 if unset) |
+   | `SOV_CHECKS_PER_HOUR` | Optional, checks per visitor per hour (12 if unset) |
+
+4. Redeploy so the new variables apply (`vercel deploy --prod`, or **Redeploy** in the dashboard).
+
+The longest route is a batch at 120 seconds, inside the 300-second default on every plan, so it runs on Hobby as well as Pro. Vercel's own Deployment Protection still guards preview URLs; the basic auth password guards the production domain. Changing an environment variable only takes effect on the next deployment.
 
 ## How the scoring works
 
@@ -108,7 +141,9 @@ src/
   app/
     page.tsx                 Chat intake (the landing page)
     report/[id]/page.tsx     Dashboard (/report/demo is the sample)
-    api/check/route.ts       Runs a check and streams NDJSON events
+    api/check/route.ts       Starts a check: validates, rate-limits, holds the budget, saves the run
+    api/check/[id]/batch/    Answers up to 5 questions of a check and streams them as NDJSON
+    api/check/[id]/finish/   Releases a check's budget hold
     api/intake/route.ts      Reads one intake reply with the intake model or the rules
     api/questions/route.ts   Writes the buyer questions for a check (AI writer, then templates)
     api/providers/route.ts   Which assistants are live or demo, and today's budget
@@ -119,12 +154,13 @@ src/
     art/                     Original artwork: Pip, clouds, sky scene, assistant glyphs
     ui/                      shadcn/ui primitives, restyled
   lib/
-    sov/                     Scoring, question generation, mock answers, run engine, rule-based intake parser
+    sov/                     Scoring, question generation, mock answers, answering and batching, budget, rate limits
+    store/                   Run state, spend ledger and counters: Upstash Redis, or in-process for local use
     intake/                  AI intake: prompt, output schema, model clients, merging into intake state
     providers/               Provider config and live API adapters, direct or via OpenRouter (plain fetch)
 ```
 
-Runs are saved in the browser's `localStorage` (the 12 most recent). Older reports are removed to make room for a big one, and a report too big to save at all stays open until you close the tab. There's no database or account.
+Runs are saved in the browser's `localStorage` (the 12 most recent). Older reports are removed to make room for a big one, and a report too big to save at all stays open until you close the tab. There are no accounts; Redis only holds what a check needs while it runs.
 
 ## Scripts
 
@@ -133,7 +169,7 @@ Runs are saved in the browser's `localStorage` (the 12 most recent). Older repor
 | `pnpm dev`       | Dev server on port 47321           |
 | `pnpm build`     | Production build                   |
 | `pnpm start`     | Serve the production build on 47321 |
-| `pnpm test`      | Unit tests (Vitest)                |
+| `pnpm test`      | Unit tests (Vitest). Set `KIOKU_TEST_REDIS_URL` and `KIOKU_TEST_REDIS_TOKEN` to also run the store tests against a real Redis REST endpoint |
 | `pnpm lint`      | ESLint                             |
 | `pnpm typecheck` | TypeScript, no emit                |
 
