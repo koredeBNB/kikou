@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { providerStatus, resolveProviders } from "@/lib/providers/config";
-import { askLive } from "@/lib/providers/live";
+import { askLive, ProviderError } from "@/lib/providers/live";
 
 type FetchCall = { url: string; init: RequestInit };
 
@@ -339,6 +339,28 @@ describe("askLive", () => {
     const call = () => askLive("claude", "q", viaOpenRouter("anthropic/claude-haiku-5.5"), impl);
     await expect(call()).rejects.toThrow(/Claude request failed \(402\)/);
     await expect(call()).rejects.not.toThrow(/or-test/);
+  });
+
+  it("says when to retry after a rate limit", async () => {
+    const impl = (async () => new Response("{}", { status: 429, headers: { "retry-after": "7" } })) as unknown as typeof fetch;
+    const error = await askLive("claude", "q", viaOpenRouter("anthropic/claude-haiku-5.5"), impl).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ status: 429, retryAfterMs: 7000, timedOut: false, message: "Claude request failed (429)" });
+  });
+
+  it("treats an error inside a successful OpenRouter response as a failure", async () => {
+    const { impl } = fakeFetch({ error: { code: 502, message: "Upstream error" } });
+    const error = await askLive("gemini", "q", viaOpenRouter("google/gemini-3.1-flash-lite"), impl).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ status: 502, message: "Gemini request failed (502)" });
+  });
+
+  it("says plainly when an assistant takes too long", async () => {
+    const hang = ((_url: string | URL, init?: RequestInit) =>
+      new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)))) as typeof fetch;
+    const error = await askLive("chatgpt", "q", viaOpenRouter("openai/gpt-6-luna"), hang, undefined, { timeoutMs: 20 }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ timedOut: true, message: "ChatGPT took too long to answer" });
   });
 
   it("throws a readable error with the status code and no secrets", async () => {

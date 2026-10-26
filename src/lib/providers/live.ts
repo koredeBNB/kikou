@@ -8,8 +8,37 @@ export interface LiveResult {
   costUsd?: number;
 }
 
-const TIMEOUT_MS = 60_000;
+export const ANSWER_TIMEOUT_MS = 60_000;
 const MAX_TOKENS = 1200;
+
+export interface AskOptions {
+  timeoutMs?: number;
+}
+
+/** A failed answer, with what a retry needs to know. Messages never include keys or response bodies. */
+export class ProviderError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly retryAfterMs?: number,
+    readonly timedOut = false,
+  ) {
+    super(message);
+    this.name = "ProviderError";
+  }
+}
+
+/** `retry-after` is either seconds or an HTTP date. */
+function retryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
+}
+
+const failed = (model: ModelId, status: number, retryAfterMs?: number) =>
+  new ProviderError(`${MODEL_LABELS[model]} request failed (${status})`, status, retryAfterMs);
 
 async function postJson(
   model: ModelId,
@@ -18,26 +47,38 @@ async function postJson(
   body: unknown,
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
+  timeoutMs = ANSWER_TIMEOUT_MS,
 ): Promise<unknown> {
-  const timeout = AbortSignal.timeout(TIMEOUT_MS);
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify(body),
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-  });
-  if (!response.ok) {
-    const status = [response.status, response.statusText].filter(Boolean).join(" ");
-    throw new Error(`${MODEL_LABELS[model]} request failed (${status})`);
+  const timeout = AbortSignal.timeout(timeoutMs);
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+  } catch (error) {
+    if (timeout.aborted && !signal?.aborted) throw new ProviderError(`${MODEL_LABELS[model]} took too long to answer`, undefined, undefined, true);
+    throw error;
   }
+  if (!response.ok) throw failed(model, response.status, retryAfter(response.headers.get("retry-after")));
   return response.json();
+}
+
+/** OpenRouter can report an upstream failure inside a 200 response. */
+function checkBody(model: ModelId, data: Json): Json {
+  const error = data.error as Json | undefined;
+  if (!error || (Array.isArray(data.choices) && data.choices.length)) return data;
+  const code = Number(error.code);
+  throw failed(model, Number.isInteger(code) && code >= 400 ? code : 502);
 }
 
 type Json = Record<string, unknown>;
 const asArray = (value: unknown): Json[] => (Array.isArray(value) ? (value as Json[]) : []);
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
 
-async function askOpenAI(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal): Promise<LiveResult> {
+async function askOpenAI(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal, timeoutMs?: number): Promise<LiveResult> {
   const body: Json = { model: s.modelName, messages: [{ role: "user", content: question }] };
   if (s.webSearch) body.web_search_options = {};
   const data = (await postJson(
@@ -47,6 +88,7 @@ async function askOpenAI(question: string, s: LiveSetting, f: typeof fetch, sign
     body,
     f,
     signal,
+    timeoutMs,
   )) as Json;
   const message = (asArray(data.choices)[0]?.message ?? {}) as Json;
   const citations = asArray(message.annotations)
@@ -56,7 +98,7 @@ async function askOpenAI(question: string, s: LiveSetting, f: typeof fetch, sign
   return { text: asString(message.content), citations };
 }
 
-async function askAnthropic(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal): Promise<LiveResult> {
+async function askAnthropic(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal, timeoutMs?: number): Promise<LiveResult> {
   const body: Json = {
     model: s.modelName,
     max_tokens: MAX_TOKENS,
@@ -70,6 +112,7 @@ async function askAnthropic(question: string, s: LiveSetting, f: typeof fetch, s
     body,
     f,
     signal,
+    timeoutMs,
   )) as Json;
   const blocks = asArray(data.content).filter((b) => b.type === "text");
   return {
@@ -86,7 +129,7 @@ function groundedUrl(uri: string, title: string): string {
   return uri.includes("vertexaisearch.cloud.google.com") && DOMAIN_TITLE.test(domain) ? `https://${domain}` : uri;
 }
 
-async function askGemini(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal): Promise<LiveResult> {
+async function askGemini(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal, timeoutMs?: number): Promise<LiveResult> {
   const body: Json = { contents: [{ role: "user", parts: [{ text: question }] }] };
   if (s.webSearch) body.tools = [{ google_search: {} }];
   const data = (await postJson(
@@ -96,6 +139,7 @@ async function askGemini(question: string, s: LiveSetting, f: typeof fetch, sign
     body,
     f,
     signal,
+    timeoutMs,
   )) as Json;
   const candidate = asArray(data.candidates)[0] ?? {};
   const parts = asArray((candidate.content as Json | undefined)?.parts);
@@ -109,7 +153,7 @@ async function askGemini(question: string, s: LiveSetting, f: typeof fetch, sign
   return { text: parts.map((p) => asString(p.text)).join(""), citations };
 }
 
-async function askPerplexity(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal): Promise<LiveResult> {
+async function askPerplexity(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal, timeoutMs?: number): Promise<LiveResult> {
   const data = (await postJson(
     "perplexity",
     "https://api.perplexity.ai/chat/completions",
@@ -117,6 +161,7 @@ async function askPerplexity(question: string, s: LiveSetting, f: typeof fetch, 
     { model: s.modelName, messages: [{ role: "user", content: question }] },
     f,
     signal,
+    timeoutMs,
   )) as Json;
   const message = (asArray(data.choices)[0]?.message ?? {}) as Json;
   const listed = Array.isArray(data.citations) ? (data.citations as unknown[]).map(asString) : [];
@@ -133,17 +178,22 @@ async function askOpenRouter(
   s: LiveSetting,
   f: typeof fetch,
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<LiveResult> {
   const body: Json = { model: s.modelName, messages: [{ role: "user", content: question }] };
   if (s.webSearch && model !== "perplexity") body.plugins = [{ id: "web" }];
-  const data = (await postJson(
+  const data = checkBody(
     model,
-    `${s.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`,
-    { authorization: `Bearer ${s.apiKey}`, "x-title": BRAND_NAME },
-    body,
-    f,
-    signal,
-  )) as Json;
+    (await postJson(
+      model,
+      `${s.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`,
+      { authorization: `Bearer ${s.apiKey}`, "x-title": BRAND_NAME },
+      body,
+      f,
+      signal,
+      timeoutMs,
+    )) as Json,
+  );
   const message = (asArray(data.choices)[0]?.message ?? {}) as Json;
   const listed = Array.isArray(data.citations) ? (data.citations as unknown[]).map(asString) : [];
   const annotated = asArray(message.annotations)
@@ -166,16 +216,17 @@ export async function askLive(
   setting: LiveSetting,
   fetchImpl: typeof fetch = fetch,
   signal?: AbortSignal,
+  { timeoutMs }: AskOptions = {},
 ): Promise<LiveResult> {
-  if (setting.via === "openrouter") return askOpenRouter(model, question, setting, fetchImpl, signal);
+  if (setting.via === "openrouter") return askOpenRouter(model, question, setting, fetchImpl, signal, timeoutMs);
   switch (model) {
     case "chatgpt":
-      return askOpenAI(question, setting, fetchImpl, signal);
+      return askOpenAI(question, setting, fetchImpl, signal, timeoutMs);
     case "claude":
-      return askAnthropic(question, setting, fetchImpl, signal);
+      return askAnthropic(question, setting, fetchImpl, signal, timeoutMs);
     case "gemini":
-      return askGemini(question, setting, fetchImpl, signal);
+      return askGemini(question, setting, fetchImpl, signal, timeoutMs);
     case "perplexity":
-      return askPerplexity(question, setting, fetchImpl, signal);
+      return askPerplexity(question, setting, fetchImpl, signal, timeoutMs);
   }
 }

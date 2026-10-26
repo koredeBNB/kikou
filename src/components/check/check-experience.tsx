@@ -23,6 +23,7 @@ import { SummaryCard } from "@/components/check/summary-card";
 import { Icon } from "@/components/icon";
 import { Button } from "@/components/ui/button";
 import { useCheckRun, type RunState } from "@/hooks/use-check-run";
+import { useThrottled } from "@/hooks/use-throttled";
 import { ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
 import { applyTurn, emptyIntake, questionCount, toBrief, topicExamples } from "@/lib/intake/flow";
@@ -75,6 +76,7 @@ const PLACEHOLDERS: Record<Step, string> = {
 };
 
 const EMPTY_BRIEF: Brief = { product: "", category: "", audience: "", competitors: [] };
+const LIVE_REPORT_MS = 750;
 const ALL_MODELS = Object.fromEntries(MODEL_IDS.map((m) => [m, true])) as Record<ModelId, boolean>;
 
 let counter = 0;
@@ -172,7 +174,7 @@ export function CheckExperience() {
         await say({ kind: "text", mood: "idle", text: `Oh dear, the check didn't finish: ${state.failure ?? "no answers came back"}. Want to try again?` });
         return;
       }
-      saveRun({
+      const saved = saveRun({
         id,
         createdAt: new Date().toISOString(),
         brief,
@@ -191,12 +193,13 @@ export function CheckExperience() {
           ? ` ${MODEL_LABELS[best.model]} recommends you most; ${MODEL_LABELS[worst.model]} could use some love.`
           : "";
       const errorsLine = state.errors.length ? ` (${state.errors.length} answer${state.errors.length === 1 ? "" : "s"} failed, so I left them out.)` : "";
+      const savedLine = saved ? "" : " This report is too big to keep in your browser, so it's only here until you close the tab.";
       setStep("done");
       await say(
         {
           kind: "text",
           mood: "happy",
-          text: `All ${report.totalAnswers} answers are in! **${brief.product}** came up in ${pct(report.product.mentionRate)} of them and ranks ${ordinal(report.productPosition)} for share of voice.${modelLine}${errorsLine}`,
+          text: `All ${report.totalAnswers} answers are in! **${brief.product}** came up in ${pct(report.product.mentionRate)} of them and ranks ${ordinal(report.productPosition)} for share of voice.${modelLine}${errorsLine}${savedLine}`,
         },
         { kind: "summary" },
       );
@@ -206,10 +209,12 @@ export function CheckExperience() {
 
   const { state: run, start, reset: resetRun } = useCheckRun(onFinish);
 
+  // Rebuilding the report on every answer gets slow for big checks, so the live view refreshes on a beat.
+  const shownAnswers = useThrottled(run.answers, LIVE_REPORT_MS, run.status !== "running");
   const live = useMemo(() => {
     if (!runCtx || run.status === "idle") return null;
-    return buildReport({ brief: runCtx.brief, questions: runCtx.questions, answers: run.answers });
-  }, [runCtx, run.answers, run.status]);
+    return buildReport({ brief: runCtx.brief, questions: runCtx.questions, answers: shownAnswers });
+  }, [runCtx, shownAnswers, run.status]);
 
   useEffect(() => {
     if (messages.length === 0) return;

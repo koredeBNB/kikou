@@ -4,6 +4,9 @@ import { estimateCheck } from "@/lib/sov/estimate";
 import { runCheck, type CostMeter } from "@/lib/sov/run";
 import { validateCheckRequest } from "@/lib/sov/validate";
 
+/** Below the idle timeouts of common proxies and tunnels (Cloudflare's is 100 seconds). */
+const HEARTBEAT_MS = 15_000;
+
 export async function POST(request: Request) {
   const parsed = validateCheckRequest(await request.json().catch(() => null));
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
@@ -31,7 +34,7 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        await runCheck({ ...parsed.value, env: process.env, signal: abort.signal, meter }, (event) => {
+        await runCheck({ ...parsed.value, env: process.env, signal: abort.signal, meter, heartbeatMs: HEARTBEAT_MS }, (event) => {
           if (!abort.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         });
       } finally {

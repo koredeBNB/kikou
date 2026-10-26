@@ -15,6 +15,8 @@ export interface RunState {
   errors: RunError[];
   total: number;
   elapsedMs: number;
+  /** When the server started answering, for the time-left estimate. */
+  startedAt?: number;
   failure?: string;
   /** The server refused the check because it would go over today's budget; `failure` holds its message. */
   limited?: boolean;
@@ -61,7 +63,7 @@ export function useCheckRun(onFinish?: (state: RunState, request: CheckRequest) 
         const handle = (event: RunEvent) => {
           switch (event.type) {
             case "start":
-              update({ ...current, models: event.models, total: event.total });
+              update({ ...current, models: event.models, total: event.total, startedAt: Date.now() });
               break;
             case "answer":
               update({ ...current, answers: [...current.answers, event.answer] });

@@ -23,19 +23,50 @@ export const INDEX_KEY = "meadowlark:runs";
 export const runKey = (id: string) => `meadowlark:run:${id}`;
 const MAX_RUNS = 12;
 
-export function saveRun(run: StoredRun): void {
+/** Runs that didn't fit in storage, so their report still opens in this tab. */
+const unsaved = new Map<string, StoredRun>();
+
+/**
+ * Saves a run, removing the oldest reports when storage is full. Returns false when it can't be
+ * saved at all (too big, or storage disabled); the reports it removed are then put back.
+ */
+export function saveRun(run: StoredRun): boolean {
+  unsaved.delete(run.id);
+  const removed: [string, string][] = [];
   try {
-    localStorage.setItem(runKey(run.id), JSON.stringify(run));
-    const index = listRuns().filter((r) => r.id !== run.id);
-    index.unshift({ id: run.id, product: run.brief.product, createdAt: run.createdAt });
-    for (const stale of index.splice(MAX_RUNS)) localStorage.removeItem(runKey(stale.id));
-    localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+    const payload = JSON.stringify(run);
+    const others = listRuns().filter((r) => r.id !== run.id);
+    const remove = (id: string) => {
+      const key = runKey(id);
+      const value = localStorage.getItem(key);
+      if (value !== null) removed.push([key, value]);
+      localStorage.removeItem(key);
+    };
+    for (const stale of others.splice(MAX_RUNS - 1)) remove(stale.id);
+    for (;;) {
+      try {
+        localStorage.setItem(runKey(run.id), payload);
+        localStorage.setItem(INDEX_KEY, JSON.stringify([{ id: run.id, product: run.brief.product, createdAt: run.createdAt }, ...others]));
+        return true;
+      } catch {
+        localStorage.removeItem(runKey(run.id));
+        const oldest = others.pop();
+        if (!oldest) break;
+        remove(oldest.id);
+      }
+    }
+    for (const [key, value] of removed.reverse()) localStorage.setItem(key, value);
   } catch {
-    // Storage can be full or disabled (private mode); the in-memory run still works.
+    // Storage is disabled (private mode) or the restore failed; the in-memory copy below still works.
   }
+  unsaved.clear();
+  unsaved.set(run.id, run);
+  return false;
 }
 
 export function loadRun(id: string): StoredRun | null {
+  const pending = unsaved.get(id);
+  if (pending) return pending;
   try {
     const raw = localStorage.getItem(runKey(id));
     return raw ? (JSON.parse(raw) as StoredRun) : null;

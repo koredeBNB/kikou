@@ -11,7 +11,8 @@ export type RunEvent =
     }
   | { type: "answer"; answer: ModelAnswer }
   | { type: "error"; model: ModelId; questionId: string; message: string }
-  | { type: "done"; elapsedMs: number; costUsd: number };
+  | { type: "done"; elapsedMs: number; costUsd: number }
+  | { type: "ping" };
 
 export interface CheckRequest {
   brief: Brief;
