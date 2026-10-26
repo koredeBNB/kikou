@@ -186,6 +186,20 @@ describe("buildReport", () => {
     expect(withExtra.brands.find((b) => b.brand === "Freshsales")?.isTrackedCompetitor).toBe(false);
   });
 
+  it("counts a discovered brand's category-suffixed name as the same brand", () => {
+    const analytics = buildReport({
+      brief: { product: "Plausible", category: "web analytics", audience: "", competitors: [] },
+      questions: [{ id: "q1", text: "What's the best web analytics?", intent: "best-for" }],
+      answers: [
+        answer("q1", "claude", "- **Fathom**: polished.\n- **Plausible**: simple."),
+        answer("q1", "gemini", "*   **[Fathom Analytics](https://usefathom.com/):** paid.\n*   **[Plausible Analytics](https://plausible.io/):** simple."),
+      ],
+    });
+    expect(analytics.brands.map((b) => b.brand).sort()).toEqual(["Fathom", "Plausible"]);
+    expect(analytics.brands.find((b) => b.brand === "Fathom")?.mentionRate).toBe(1);
+    expect(analytics.product.mentionRate).toBe(1);
+  });
+
   it("never turns user-written questions into intent tips", () => {
     const custom = buildReport({
       brief,

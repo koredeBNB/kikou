@@ -75,7 +75,7 @@ export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 
   const discovered = discoverBrands(
     answers.map((a) => a.text),
     [product, ...competitors],
-    { minAnswers: discoverMinAnswers },
+    { minAnswers: discoverMinAnswers, category: brief.category },
   );
   const allBrands = [product, ...competitors, ...discovered];
   const questionText = new Map(questions.map((q) => [q.id, q.text]));

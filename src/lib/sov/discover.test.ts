@@ -37,3 +37,51 @@ describe("discoverBrands", () => {
     expect(found).not.toContain("Bottom line");
   });
 });
+
+describe("discoverBrands on real assistant answers", () => {
+  // Shapes seen in live ChatGPT, Claude, Gemini and Perplexity answers for "web analytics".
+  const claude = `- **Fathom**: Similar to Plausible, polished and reliable, with a higher price.
+- **Google Analytics 4 (GA4):** The default for most sites.
+- **Matomo (formerly Piwik)**: self-hosted or cloud.`;
+  const gemini = `*   **[Fathom Analytics](https://usefathom.com/):** Simple and privacy-friendly.
+*   **[Umami](https://umami.is/):** Open source and lightweight.
+*   **[Plausible Analytics](https://plausible.io/):** The most popular open-source alternative.
+*   **Google Analytics 4:** The industry baseline.`;
+  const perplexity = `1. **Umami**
+  - Privacy\u2011first, cookieless, minimal interface.[5][11]
+2. **Matomo**
+  - Privacy\u2011first, open source.[5][10]
+- **Fathom** is a paid, polished option.
+* **[Plausible Analytics](https://plausible.io/)**: lightweight.`;
+  const chatgpt = `| Pick | Why |
+1. **Simple Analytics**
+   - Privacy\u2011first, fast setup.`;
+  const answers = [claude, gemini, perplexity, chatgpt];
+  const found = discoverBrands(answers, ["Plausible"], { category: "web analytics" });
+
+  it("counts a brand and its category-suffixed name as one brand", () => {
+    expect(found.filter((b) => b.startsWith("Fathom"))).toEqual(["Fathom"]);
+  });
+
+  it("drops trailing parentheticals from names", () => {
+    expect(found.filter((b) => b.startsWith("Google"))).toEqual(["Google Analytics 4"]);
+    expect(found.filter((b) => b.startsWith("Matomo"))).toEqual(["Matomo"]);
+  });
+
+  it("reads brands written as markdown links", () => {
+    expect(found).toContain("Umami");
+  });
+
+  it("never lists the product under a longer name", () => {
+    expect(found).not.toContain("Plausible Analytics");
+  });
+
+  it("skips descriptor phrases", () => {
+    expect(found).not.toContain("Privacy\u2011first");
+  });
+
+  it("merges variants before applying the answer threshold", () => {
+    const merged = discoverBrands(["- **Swetrix**: cheap.", "- **Swetrix Analytics**: open source."], [], { category: "web analytics" });
+    expect(merged).toEqual(["Swetrix"]);
+  });
+});
