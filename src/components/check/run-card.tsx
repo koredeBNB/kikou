@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RunState } from "@/hooks/use-check-run";
 import { listJoin } from "@/lib/format";
+import { timeLeft } from "@/lib/sov/time-left";
 import { MODEL_LABELS, type Brief, type ModelAnswer, type ModelId, type Question, type Report } from "@/lib/sov/types";
 import { cn } from "@/lib/utils";
 
@@ -39,10 +40,14 @@ export function RunCard({
   onOpenAnswer: (answer: ModelAnswer) => void;
 }) {
   const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(0);
   const running = run.status === "running";
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => setTick((t) => t + 1), 2400);
+    const id = setInterval(() => {
+      setTick((t) => t + 1);
+      setNow(Date.now());
+    }, 2400);
     return () => clearInterval(id);
   }, [running]);
 
@@ -54,7 +59,10 @@ export function RunCard({
   const topRival = live.brands.find((b) => !b.isProduct && b.mentions > 0);
   const line = LINES[tick % LINES.length](MODEL_LABELS[models[tick % models.length]], brief.product);
   const compact = questions.length > COMPACT_AFTER;
-  const left = running ? timeLeft(run, answered, total) : null;
+  const left =
+    running && run.startedAt && now > run.startedAt
+      ? timeLeft({ elapsedMs: now - run.startedAt, models, questions: questions.length, answers: run.answers, errors: run.errors })
+      : null;
 
   return (
     <div className="space-y-4">
@@ -178,16 +186,6 @@ function finishedIn(ms: number): string {
   if (seconds < 90) return `${seconds.toFixed(1)}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes} min ${Math.round(seconds - minutes * 60)}s`;
-}
-
-/** From the pace so far; shown once a few answers are in. */
-function timeLeft(run: RunState, answered: number, total: number): string | null {
-  if (!run.startedAt || answered < 4 || answered >= total) return null;
-  const perAnswer = (Date.now() - run.startedAt) / answered;
-  const seconds = (perAnswer * (total - answered)) / 1000;
-  if (seconds < 45) return "almost done";
-  if (seconds < 90) return "about a minute left";
-  return `about ${Math.round(seconds / 60)} minutes left`;
 }
 
 function ModelProgress({ models, questions, run, live }: { models: ModelId[]; questions: number; run: RunState; live: Report }) {
