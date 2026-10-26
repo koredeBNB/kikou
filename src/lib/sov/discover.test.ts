@@ -38,6 +38,47 @@ describe("discoverBrands", () => {
   });
 });
 
+describe("discoverBrands with everyday words as headings", () => {
+  // Shapes seen in live answers for crypto questions: criteria as bold list headings.
+  const answers = [
+    `1. **Liquidity**: deep order books keep slippage low.\n2. **Fees**: watch the fees on small trades.\n3. **Solana**: fast and cheap.\n4. **Ledger**: a hardware wallet.`,
+    `- **Fees** – low fees matter when you trade often.\n- **Liquidity** – thin liquidity hurts.\n- **Solana** is popular.\n- **Ledger** keeps keys offline.\n- **MetaMask** – the default browser wallet (metamask.io).`,
+    `Look for liquidity and fair fees. **MetaMask** (https://metamask.io) and Solana come up a lot.\n- **MetaMask**: browser wallet, see metamask.io.\n- **Ledger**: every chain records a public ledger, and Ledger signs offline.`,
+  ];
+
+  it("skips headings that the answers also use as ordinary words", () => {
+    const found = discoverBrands(answers, []);
+    expect(found).not.toContain("Liquidity");
+    expect(found).not.toContain("Fees");
+    expect(found).toEqual(expect.arrayContaining(["Solana", "Ledger"]));
+  });
+
+  it("keeps brands whose site is linked in lower case", () => {
+    expect(discoverBrands(answers, [])).toContain("MetaMask");
+  });
+
+  it("skips headings made only of generic criteria, but keeps brands that contain one", () => {
+    const item = (name: string) => `- **${name}**: details.`;
+    const names = [
+      "Tokenomics",
+      "Competition",
+      "Regulatory risk",
+      "Liquidity Risk",
+      "User Experience",
+      "Customer Support",
+      "Hardware wallets",
+      "Security features",
+      "Coinbase Advanced",
+      "Ocean Protocol",
+      "Coinbase Wallet",
+      "Trust Wallet",
+      "Ledger Live",
+    ];
+    const text = names.map(item).join("\n");
+    expect(discoverBrands([text, text], [])).toEqual(["Coinbase Advanced", "Ocean Protocol", "Coinbase Wallet", "Trust Wallet", "Ledger Live"]);
+  });
+});
+
 describe("discoverBrands on real assistant answers", () => {
   // Shapes seen in live ChatGPT, Claude, Gemini and Perplexity answers for "web analytics".
   const claude = `- **Fathom**: Similar to Plausible, polished and reliable, with a higher price.

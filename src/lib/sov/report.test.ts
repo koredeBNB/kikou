@@ -186,6 +186,20 @@ describe("buildReport", () => {
     expect(withExtra.brands.find((b) => b.brand === "Freshsales")?.isTrackedCompetitor).toBe(false);
   });
 
+  it("never counts a research topic as a brand", () => {
+    const withTopics = buildReport({
+      brief: { ...brief, topics: ["RWA"] },
+      questions,
+      answers: [
+        ...answers,
+        answer("q1", "claude", "1. **RWA**: tokenised assets.\n2. **Freshsales** – AI scoring."),
+        answer("q2", "claude", "- **RWA**: still early.\n- **Freshsales**: cheap."),
+      ],
+    });
+    expect(withTopics.brands.map((b) => b.brand)).toContain("Freshsales");
+    expect(withTopics.brands.map((b) => b.brand)).not.toContain("RWA");
+  });
+
   it("counts a discovered brand's category-suffixed name as the same brand", () => {
     const analytics = buildReport({
       brief: { product: "Plausible", category: "web analytics", audience: "", competitors: [] },

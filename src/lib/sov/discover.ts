@@ -61,6 +61,35 @@ const GENERIC_FIRST_WORDS = new Set([
   "honourable",
 ]);
 
+/** Criteria that answers use as headings. A name made only of these (and connectors) isn't a brand. */
+const GENERIC_TERMS = new Set([
+  ...GENERIC_FIRST_WORDS,
+  ..."of and the & for to in on with a an vs".split(" "),
+  ...[
+    "risk risks tokenomics competition competitors regulation regulations regulatory legal liquidity volatility",
+    "security safety fees fee costs adoption utility ecosystem community roadmap team diversification custody",
+    "self-custody staking yield yields returns rewards speed reliability reputation privacy compliance",
+    "transparency partnerships interoperability governance valuation market cap demand supply development",
+    "insurance reviews ratings onboarding documentation usability user users experience interface design",
+    "customization flexibility accessibility availability compatibility control convenience value quality",
+    "research education history track record growth momentum innovation technology infrastructure network",
+    "effects chain chains multi-chain cross-chain assets asset coverage backup recovery seed phrase hardware",
+    "software mobile desktop browser extension extensions wallet wallets exchange exchanges account accounts",
+    "management tools analytics reporting automation customer service setup integration limits limitations",
+    "drawbacks downsides benefits advantages strengths weaknesses caveats warnings important final thoughts",
+    "takeaway takeaways next steps quick comparison criteria factors tax taxes swaps trading bridging defi",
+    "blockchain crypto cryptocurrency token tokens coin coins performance use cases",
+  ]
+    .join(" ")
+    .split(" "),
+]);
+
+const isGenericPhrase = (name: string) =>
+  name
+    .toLowerCase()
+    .split(/\s+/)
+    .every((word) => GENERIC_TERMS.has(word.replace(/[^\p{L}\p{N}&-]/gu, "")));
+
 function candidateFrom(item: string): string | null {
   const text = item.replace(MARKDOWN_LINK, "$1");
   const bold = text.match(BOLD_LEAD);
@@ -71,7 +100,7 @@ function candidateFrom(item: string): string | null {
   if (name.length < 2 || name.length > 40 || words.length > 4) return null;
   if (!/^[\p{Lu}\p{N}]/u.test(name)) return null;
   if (/^\d+$/.test(name) || DESCRIPTOR.test(name)) return null;
-  if (GENERIC_FIRST_WORDS.has(words[0].toLowerCase())) return null;
+  if (GENERIC_FIRST_WORDS.has(words[0].toLowerCase()) || isGenericPhrase(name)) return null;
   return name;
 }
 
@@ -117,8 +146,22 @@ export function discoverBrands(texts: string[], known: string[], options: Discov
     }
   }
 
+  const prose = texts.map((text) => text.replace(LINKS, " "));
   return [...new Set(found.values())]
-    .filter((entry) => entry.answers >= minAnswers)
+    .filter((entry) => entry.answers >= minAnswers && !isEverydayWord(displayName(entry.names), entry.answers, prose))
     .sort((a, b) => b.answers - a.answers || a.firstSeen - b.firstSeen)
     .map((entry) => displayName(entry.names));
+}
+
+const LINKS = /\bhttps?:\/\/\S+|\b[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.[a-z]{2,}\b/gu;
+
+/**
+ * Headings like “Fees” or “Liquidity” also show up in lower case all through the prose, which
+ * brand names rarely do. Links are removed first, so “metamask.io” doesn't count against MetaMask.
+ */
+function isEverydayWord(name: string, headingAnswers: number, prose: string[]): boolean {
+  const lower = name.toLowerCase();
+  if (lower === name) return false;
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u");
+  return prose.filter((text) => pattern.test(text)).length >= headingAnswers;
 }

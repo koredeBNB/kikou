@@ -74,7 +74,7 @@ export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 
   const { product, competitors } = trackedBrands(brief);
   const discovered = discoverBrands(
     answers.map((a) => a.text),
-    [product, ...competitors],
+    [product, ...competitors, ...(brief.topics ?? [])],
     { minAnswers: discoverMinAnswers, category: brief.category },
   );
   const allBrands = [product, ...competitors, ...discovered];
