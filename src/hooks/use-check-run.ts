@@ -16,7 +16,7 @@ export interface RunState {
   total: number;
   elapsedMs: number;
   failure?: string;
-  /** The server refused the check because today's cap is used up; `failure` holds its message. */
+  /** The server refused the check because it would go over today's budget; `failure` holds its message. */
   limited?: boolean;
 }
 
@@ -47,7 +47,7 @@ export function useCheckRun(onFinish?: (state: RunState, request: CheckRequest) 
         });
         if (!response.ok || !response.body) {
           const body = await response.json().catch(() => ({}));
-          if (body.code === "daily-limit" && typeof body.error === "string") {
+          if (body.code === "daily-budget" && typeof body.error === "string") {
             update({ ...current, status: "failed", failure: body.error, limited: true });
             onFinish?.(current, request);
             return;

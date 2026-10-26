@@ -17,6 +17,12 @@ export interface RunOptions {
   delay?: (ms: number) => Promise<void>;
   concurrency?: number;
   signal?: AbortSignal;
+  /** Running total of what the check has cost, readable even when it stops early. */
+  meter?: CostMeter;
+}
+
+export interface CostMeter {
+  costUsd: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -32,7 +38,7 @@ export async function runCheck(options: RunOptions, emit: (event: RunEvent) => v
   const started = Date.now();
   const status = providerStatus(env).filter((p) => models.includes(p.id));
   const tasks = questions.flatMap((question) => models.map((model) => ({ question, model })));
-  let costUsd = 0;
+  const meter = options.meter ?? { costUsd: 0 };
 
   emit({ type: "start", brief, questions, models: status, total: tasks.length });
 
@@ -59,7 +65,7 @@ export async function runCheck(options: RunOptions, emit: (event: RunEvent) => v
           answer = mockAnswer(brief, question, model);
           await delay(answer.latencyMs);
         }
-        costUsd += answerCost(answer, setting.live && searches(model, setting.webSearch, true));
+        meter.costUsd += answerCost(answer, setting.live && searches(model, setting.webSearch, true));
         if (!signal?.aborted) emit({ type: "answer", answer });
       } catch (error) {
         if (signal?.aborted) return;
@@ -71,5 +77,5 @@ export async function runCheck(options: RunOptions, emit: (event: RunEvent) => v
 
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 6, tasks.length));
   await Promise.all(Array.from({ length: concurrency }, worker));
-  if (!signal?.aborted) emit({ type: "done", elapsedMs: Date.now() - started, costUsd });
+  if (!signal?.aborted) emit({ type: "done", elapsedMs: Date.now() - started, costUsd: meter.costUsd });
 }
