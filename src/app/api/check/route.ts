@@ -1,51 +1,16 @@
-import { providerStatus } from "@/lib/providers/config";
-import { reserveBudget, settleBudget } from "@/lib/sov/budget";
-import { estimateFor } from "@/lib/sov/estimate";
-import { runCheck, type CostMeter } from "@/lib/sov/run";
-import { validateCheckRequest } from "@/lib/sov/validate";
+import { refusalResponse, startCheck, storeDownResponse } from "@/lib/sov/checks";
+import { checkStore } from "@/lib/store";
 
-/** Below the idle timeouts of common proxies and tunnels (Cloudflare's is 100 seconds). */
-const HEARTBEAT_MS = 15_000;
+export const maxDuration = 30;
 
+/** Starts a check. The answers come from `/api/check/[id]/batch`, a few at a time. */
 export async function POST(request: Request) {
-  const parsed = validateCheckRequest(await request.json().catch(() => null));
-  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
-
-  const { questions, models, webSearch } = parsed.value;
-  const estimate = estimateFor({ questions: questions.length, models, providers: providerStatus(process.env), webSearch });
-  const claim = reserveBudget(process.env, estimate.costUsd);
-  if (!claim.ok) {
-    return Response.json(
-      { error: claim.message, code: "daily-budget", remainingUsd: claim.remainingUsd, limitUsd: claim.limitUsd },
-      { status: 429, headers: { "retry-after": String(claim.retryAfterSeconds) } },
-    );
+  const body = await request.json().catch(() => null);
+  try {
+    const result = await startCheck(body, request.headers, { env: process.env, store: checkStore() });
+    if (!result.ok) return refusalResponse(result);
+    return Response.json(result.started, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    return storeDownResponse(error);
   }
-
-  const encoder = new TextEncoder();
-  const abort = new AbortController();
-  request.signal.addEventListener("abort", () => abort.abort());
-  const meter: CostMeter = { costUsd: 0 };
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
-        await runCheck({ ...parsed.value, env: process.env, signal: abort.signal, meter, heartbeatMs: HEARTBEAT_MS }, (event) => {
-          if (!abort.signal.aborted) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-        });
-      } finally {
-        settleBudget(claim, meter.costUsd);
-        if (!abort.signal.aborted) controller.close();
-      }
-    },
-    cancel() {
-      abort.abort();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "content-type": "application/x-ndjson; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-    },
-  });
 }

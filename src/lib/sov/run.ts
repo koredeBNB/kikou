@@ -1,39 +1,32 @@
-import { providerStatus, resolveProviders, type Env, type LiveSetting, type ProviderSetting } from "@/lib/providers/config";
-import { askLive, ProviderError, type LiveResult } from "@/lib/providers/live";
-import { answerCost, PER_MODEL_CONCURRENCY, searches } from "@/lib/sov/estimate";
-import type { RunEvent } from "@/lib/sov/events";
+import { resolveProviders, type Env, type LiveSetting, type ProviderSetting } from "@/lib/providers/config";
+import { ANSWER_TIMEOUT_MS, askLive, ProviderError, type LiveResult } from "@/lib/providers/live";
+import { answerCost, searches } from "@/lib/sov/estimate";
 import { mockAnswer } from "@/lib/sov/mock";
+import type { TaskResult } from "@/lib/store/types";
 import type { Brief, ModelAnswer, ModelId, Question } from "@/lib/sov/types";
 
-export interface RunOptions {
+export interface AnswerOptions {
   brief: Brief;
-  questions: Question[];
-  models: ModelId[];
   env: Env;
   /** False switches web search off for this check. */
   webSearch?: boolean;
   fetchImpl?: typeof fetch;
   /** Waits out mock latency and retry backoff, so tests can skip both. */
   delay?: (ms: number) => Promise<void>;
-  /** Requests in flight at once for each assistant. */
-  concurrency?: number;
   signal?: AbortSignal;
-  /** Running total of what the check has cost, readable even when it stops early. */
-  meter?: CostMeter;
-  /** How long one answer may take. */
+  /** How long one attempt may take. */
   timeoutMs?: number;
-  /** Emits a ping this often while the check runs, so proxies don't close a quiet stream. */
-  heartbeatMs?: number;
-}
-
-export interface CostMeter {
-  costUsd: number;
+  /** Epoch ms the answer must be in by. Attempts are cut short to fit, and retries stop when time runs out. */
+  deadline?: number;
+  now?: () => number;
 }
 
 /** Retries for rate limits and server errors; a timeout is retried once. */
 export const MAX_RETRIES = 3;
 const BACKOFF_MS = 2000;
 const MAX_WAIT_MS = 30_000;
+/** A retry needs at least this long left before the deadline to be worth starting. */
+export const MIN_ATTEMPT_MS = 8000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -50,66 +43,41 @@ export function retryWait(error: unknown, attempt: number): number | null {
   return Math.min(error.retryAfterMs ?? BACKOFF_MS * 2 ** (attempt - 1), MAX_WAIT_MS);
 }
 
-export async function runCheck(options: RunOptions, emit: (event: RunEvent) => void): Promise<void> {
-  const { brief, questions, models, env, fetchImpl = fetch, delay = sleep, signal, timeoutMs } = options;
-  const webSearch = options.webSearch !== false;
-  const providers = resolveProviders(env);
-  const started = Date.now();
-  const status = providerStatus(env).filter((p) => models.includes(p.id));
-  const meter = options.meter ?? { costUsd: 0 };
-
-  emit({ type: "start", brief, questions, models: status, total: questions.length * models.length });
-  const heartbeat = options.heartbeatMs ? setInterval(() => !signal?.aborted && emit({ type: "ping" }), options.heartbeatMs) : undefined;
-
-  const ask = async (model: ModelId, setting: LiveSetting, question: Question): Promise<LiveResult> => {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return await askLive(model, question.text, setting, fetchImpl, signal, { timeoutMs });
-      } catch (error) {
-        const wait = signal?.aborted ? null : retryWait(error, attempt);
-        if (wait === null) throw error;
-        if (wait > 0) await delay(wait);
-        if (signal?.aborted) throw error;
-      }
-    }
-  };
-
-  const answerOne = async (model: ModelId, question: Question) => {
-    const setting = forCheck(providers[model], webSearch);
-    const began = Date.now();
+async function askWithRetries(model: ModelId, setting: LiveSetting, question: Question, options: AnswerOptions): Promise<LiveResult> {
+  const { fetchImpl = fetch, delay = sleep, signal, deadline, now = Date.now } = options;
+  const limit = options.timeoutMs ?? ANSWER_TIMEOUT_MS;
+  for (let attempt = 1; ; attempt++) {
+    const left = deadline === undefined ? Infinity : deadline - now();
     try {
-      let answer: ModelAnswer;
-      if (setting.live) {
-        const result = await ask(model, setting, question);
-        answer = { questionId: question.id, model, text: result.text, citations: result.citations, source: "live", latencyMs: Date.now() - began };
-        if (result.costUsd !== undefined) answer.costUsd = result.costUsd;
-      } else {
-        answer = mockAnswer(brief, question, model);
-        await delay(answer.latencyMs);
-      }
-      meter.costUsd += answerCost(answer, setting.live && searches(model, setting.webSearch, true));
-      if (!signal?.aborted) emit({ type: "answer", answer });
+      return await askLive(model, question.text, setting, fetchImpl, signal, { timeoutMs: Math.max(1, Math.min(limit, left)) });
     } catch (error) {
-      if (signal?.aborted) return;
-      const message = error instanceof Error ? error.message : "Unknown error";
-      emit({ type: "error", model, questionId: question.id, message });
+      const wait = signal?.aborted ? null : retryWait(error, attempt);
+      if (wait === null) throw error;
+      if (deadline !== undefined && deadline - now() - wait < MIN_ATTEMPT_MS) throw error;
+      if (wait > 0) await delay(wait);
+      if (signal?.aborted) throw error;
     }
-  };
-
-  // Each assistant gets its own small pool, so one slow or rate-limited assistant doesn't hold up the others.
-  const perModel = Math.max(1, options.concurrency ?? PER_MODEL_CONCURRENCY);
-  const pools = models.map((model) => {
-    let next = 0;
-    const worker = async () => {
-      while (next < questions.length && !signal?.aborted) await answerOne(model, questions[next++]);
-    };
-    return Array.from({ length: Math.min(perModel, questions.length) }, worker);
-  });
-
-  try {
-    await Promise.all(pools.flat());
-  } finally {
-    clearInterval(heartbeat);
   }
-  if (!signal?.aborted) emit({ type: "done", elapsedMs: Date.now() - started, costUsd: meter.costUsd });
+}
+
+/** One assistant's answer to one question, with retries, and what it cost. Failures come back as error results. */
+export async function answerTask(model: ModelId, question: Question, options: AnswerOptions): Promise<{ result: TaskResult; costUsd: number }> {
+  const { brief, env, delay = sleep, now = Date.now } = options;
+  const setting = forCheck(resolveProviders(env)[model], options.webSearch !== false);
+  const began = now();
+  try {
+    let answer: ModelAnswer;
+    if (setting.live) {
+      const result = await askWithRetries(model, setting, question, options);
+      answer = { questionId: question.id, model, text: result.text, citations: result.citations, source: "live", latencyMs: now() - began };
+      if (result.costUsd !== undefined) answer.costUsd = result.costUsd;
+    } else {
+      answer = mockAnswer(brief, question, model);
+      await delay(answer.latencyMs);
+    }
+    return { result: { type: "answer", answer }, costUsd: answerCost(answer, setting.live && searches(model, setting.webSearch, true)) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return { result: { type: "error", model, questionId: question.id, message }, costUsd: 0 };
+  }
 }
