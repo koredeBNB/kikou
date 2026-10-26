@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { INDEX_KEY, listRuns, loadRun, runKey, saveRun, type StoredRun } from "@/lib/sov/storage";
+import { INDEX_KEY, listRuns, loadRun, runKey, saveRun, unsavedRun, type StoredRun } from "@/lib/sov/storage";
 
 /** A localStorage stand-in that throws like a browser once `quota` characters are stored. */
 function fakeStorage(quota: number) {
@@ -62,6 +62,8 @@ describe("saveRun", () => {
     saveRun(run("keep", 100));
     expect(saveRun(run("huge", 20_000))).toBe(false);
     expect(loadRun("huge")?.brief.product).toBe("P-huge");
+    expect(unsavedRun("huge")?.id).toBe("huge");
+    expect(unsavedRun("keep")).toBeNull();
     expect(listRuns().map((r) => r.id)).toEqual(["keep"]);
     expect(JSON.parse(storage.getItem(INDEX_KEY) ?? "[]")).toHaveLength(1);
   });

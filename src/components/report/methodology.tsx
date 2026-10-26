@@ -16,6 +16,22 @@ const ITEMS = [
     a: "Buyers ask open questions, so these do too. That way every mention is earned. If a question names a brand (like “alternatives to X”), that brand isn't credited for that answer.",
   },
   {
+    q: "Where do the questions come from?",
+    a: "You choose how many, up to 100. Small checks use a built-in set. For bigger ones an AI writer (DeepSeek V4 Flash) drafts a mix of buyer questions: best picks, alternatives, comparisons, beginners, budget and specific use cases. Near-duplicates and anything naming your product or site are thrown out, and you can edit the list before it runs.",
+  },
+  {
+    q: "How do research topics work?",
+    a: "If you name topics, the questions are split evenly across them and written for each one. The “By topic” section scores each topic on its own questions, using the same rivals as the whole check, so you can see where you lead and where you're missing.",
+  },
+  {
+    q: "What happens when an answer fails?",
+    a: "Each assistant gets a few requests at a time. Rate limits and server errors are retried up to three times with a growing wait, and slow answers get one more try. Answers that still fail are listed in the report and left out of every number.",
+  },
+  {
+    q: "How is the cost estimated?",
+    a: "From the average cost and time of real answers from each assistant, with web search on or off. The estimate is held against the day's budget when a check starts, and the actual cost is booked when it finishes.",
+  },
+  {
     q: "Where do the rivals come from?",
     a: "Competitors you listed are always tracked. Any other brand that appears as a list item in at least two answers is added automatically, so you can spot rivals you didn't know about.",
   },

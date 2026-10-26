@@ -64,6 +64,8 @@ export function saveRun(run: StoredRun): boolean {
   return false;
 }
 
+export const unsavedRun = (id: string): StoredRun | null => unsaved.get(id) ?? null;
+
 export function loadRun(id: string): StoredRun | null {
   const pending = unsaved.get(id);
   if (pending) return pending;

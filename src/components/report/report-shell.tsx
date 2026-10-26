@@ -7,11 +7,13 @@ import {
   Globe02Icon,
   Idea01Icon,
   InformationCircleIcon,
+  Layers01Icon,
   Menu01Icon,
   PieChartIcon,
   PlusSignIcon,
   RankingIcon,
 } from "@hugeicons/core-free-icons";
+import type { IconSvgElement } from "@hugeicons/react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Pip } from "@/components/art/pip";
@@ -24,9 +26,12 @@ import { DEMO_RUN_ID } from "@/lib/sov/demo";
 import { INDEX_KEY } from "@/lib/sov/storage";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+type NavItem = { id: string; label: string; icon: IconSvgElement };
+
+const NAV: NavItem[] = [
   { id: "overview", label: "Overview", icon: DashboardSquare01Icon },
   { id: "share-of-voice", label: "Share of voice", icon: PieChartIcon },
+  { id: "topics", label: "Topics", icon: Layers01Icon },
   { id: "recommendations", label: "Next steps", icon: Idea01Icon },
   { id: "rankings", label: "Leaderboard", icon: RankingIcon },
   { id: "assistants", label: "Assistants", icon: AiChat02Icon },
@@ -55,34 +60,33 @@ function useRecentRuns() {
   }, [raw]);
 }
 
-function useActiveSection(enabled: boolean) {
-  const [active, setActive] = useState(NAV[0].id);
+function useActiveSection(enabled: boolean, nav: NavItem[]) {
+  const [active, setActive] = useState(nav[0].id);
   useEffect(() => {
     if (!enabled) return;
     const visible = new Map<string, number>();
     const observer = new IntersectionObserver(
       (entries) => {
         for (const e of entries) visible.set(e.target.id, e.isIntersecting ? e.intersectionRatio : 0);
-        const order = NAV.map((n) => n.id);
-        const best = order.find((id) => (visible.get(id) ?? 0) > 0);
+        const best = nav.map((n) => n.id).find((id) => (visible.get(id) ?? 0) > 0);
         if (best) setActive(best);
       },
       { rootMargin: "-90px 0px -55% 0px", threshold: [0, 0.01, 0.25] },
     );
-    for (const n of NAV) {
+    for (const n of nav) {
       const el = document.getElementById(n.id);
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [enabled]);
+  }, [enabled, nav]);
   return active;
 }
 
-function NavList({ active, onNavigate }: { active: string; onNavigate?: () => void }) {
+function NavList({ nav, active, onNavigate }: { nav: NavItem[]; active: string; onNavigate?: () => void }) {
   return (
     <nav aria-label="Report sections">
       <ul className="space-y-1">
-        {NAV.map((n) => (
+        {nav.map((n) => (
           <li key={n.id}>
             <a
               href={`#${n.id}`}
@@ -146,8 +150,21 @@ function TipCard({ tip, onNavigate }: { tip?: string; onNavigate?: () => void })
   );
 }
 
-export function ReportShell({ runId, tip, ready, children }: { runId: string; tip?: string; ready: boolean; children: ReactNode }) {
-  const active = useActiveSection(ready);
+export function ReportShell({
+  runId,
+  tip,
+  ready,
+  topics = false,
+  children,
+}: {
+  runId: string;
+  tip?: string;
+  ready: boolean;
+  topics?: boolean;
+  children: ReactNode;
+}) {
+  const nav = useMemo(() => (topics ? NAV : NAV.filter((n) => n.id !== "topics")), [topics]);
+  const active = useActiveSection(ready, nav);
   const [open, setOpen] = useState(false);
 
   return (
@@ -161,7 +178,7 @@ export function ReportShell({ runId, tip, ready, children }: { runId: string; ti
             New check
           </Link>
         </Button>
-        <NavList active={active} />
+        <NavList nav={nav} active={active} />
         <div className="mt-auto space-y-5">
           <RecentRuns currentId={runId} />
           <TipCard tip={tip} />
@@ -179,7 +196,7 @@ export function ReportShell({ runId, tip, ready, children }: { runId: string; ti
           <SheetContent side="left" className="w-72 gap-6 overflow-y-auto bg-[#FFFCF4] px-4 py-5">
             <SheetTitle className="sr-only">Report menu</SheetTitle>
             <BrandMark className="px-2" />
-            <NavList active={active} onNavigate={() => setOpen(false)} />
+            <NavList nav={nav} active={active} onNavigate={() => setOpen(false)} />
             <RecentRuns currentId={runId} onNavigate={() => setOpen(false)} />
             <TipCard tip={tip} onNavigate={() => setOpen(false)} />
           </SheetContent>

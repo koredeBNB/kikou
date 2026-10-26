@@ -11,9 +11,11 @@ import { ReportShell } from "@/components/report/report-shell";
 import { ReportLoading, ReportNotFound } from "@/components/report/report-states";
 import { brandColors, Reveal } from "@/components/report/shared";
 import { SourcesCard } from "@/components/report/sources";
+import { TopicsCard } from "@/components/report/topics";
 import { buildDemoRun, DEMO_RUN_ID } from "@/lib/sov/demo";
 import { buildReport } from "@/lib/sov/report";
-import { runKey, type StoredRun } from "@/lib/sov/storage";
+import { runKey, unsavedRun, type StoredRun } from "@/lib/sov/storage";
+import { buildTopicBreakdown } from "@/lib/sov/topics";
 import type { AnalyzedAnswer } from "@/lib/sov/types";
 
 const subscribe = (onChange: () => void) => {
@@ -21,23 +23,26 @@ const subscribe = (onChange: () => void) => {
   return () => window.removeEventListener("storage", onChange);
 };
 
+const UNSAVED = "unsaved";
+
 function useStoredRun(id: string): StoredRun | null | undefined {
   const demo = id === DEMO_RUN_ID;
   const raw = useSyncExternalStore(
     subscribe,
-    () => (demo ? DEMO_RUN_ID : localStorage.getItem(runKey(id))),
+    () => (demo ? DEMO_RUN_ID : unsavedRun(id) ? UNSAVED : localStorage.getItem(runKey(id))),
     () => undefined,
   );
   return useMemo(() => {
     if (raw === undefined) return undefined;
     if (demo) return buildDemoRun();
+    if (raw === UNSAVED) return unsavedRun(id);
     if (!raw) return null;
     try {
       return JSON.parse(raw) as StoredRun;
     } catch {
       return null;
     }
-  }, [raw, demo]);
+  }, [raw, demo, id]);
 }
 
 export function ReportView({ id }: { id: string }) {
@@ -49,13 +54,14 @@ export function ReportView({ id }: { id: string }) {
 
 function Dashboard({ run }: { run: StoredRun }) {
   const report = useMemo(() => buildReport({ brief: run.brief, questions: run.questions, answers: run.answers }), [run]);
+  const topics = useMemo(() => buildTopicBreakdown(run, report), [run, report]);
   const colors = useMemo(() => brandColors(report), [report]);
   const [open, setOpen] = useState<AnalyzedAnswer | null>(null);
   const question = open ? report.questions.find((q) => q.id === open.questionId) : undefined;
   const rank = open ? (report.prompts.find((p) => p.question.id === open.questionId)?.cells[open.model]?.rank ?? null) : undefined;
 
   return (
-    <ReportShell runId={run.id} tip={report.recommendations[0]?.title} ready>
+    <ReportShell runId={run.id} tip={report.recommendations[0]?.title} topics={topics.length > 0} ready>
       <main className="mx-auto max-w-[88rem] space-y-5 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <ReportHeader run={run} report={report} />
         <VerdictBanner run={run} report={report} />
@@ -71,6 +77,12 @@ function Dashboard({ run }: { run: StoredRun }) {
             <AssistantsGlance report={report} />
           </Reveal>
         </div>
+
+        {topics.length > 0 && (
+          <Reveal>
+            <TopicsCard product={report.brief.product} topics={topics} colors={colors} />
+          </Reveal>
+        )}
 
         <Reveal>
           <RecommendationsCard report={report} />
@@ -97,7 +109,7 @@ function Dashboard({ run }: { run: StoredRun }) {
         </div>
 
         <Reveal>
-          <PromptsCard report={report} onOpenAnswer={setOpen} />
+          <PromptsCard report={report} errors={run.errors ?? []} onOpenAnswer={setOpen} />
         </Reveal>
 
         <Reveal>

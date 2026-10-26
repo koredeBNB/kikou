@@ -1,12 +1,13 @@
 # Kioku: AI search share-of-voice checker
 
-**Are you in the AI's memory?** Kioku (Japanese for "memory") shows whether AI assistants recommend your product. Tell Pip (the bird who runs the checks) your product, category, audience and rivals. Pip asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and then builds a report:
+**Are you in the AI's memory?** Kioku (Japanese for "memory") shows whether AI assistants recommend your product. Tell Pip (the bird who runs the checks) your product, category, audience, rivals and, if you like, the topics to research ("research BNB's standing within trading, RWA, AI"). Pick how many questions to ask, from 1 to 100. Pip shows what the check will cost and how long it will take, and once you say go, asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and builds a report:
 
 - **Share of voice**, overall and for each assistant
+- **By topic**: share of voice, rank, rivals, cited sources and next steps for each research topic
 - **Ranking**: average position, mention rate and first-place answers
 - **Cited sources**: which domains the assistants trust, including your site and rivals' sites
 - **Assistant by assistant**: how each one treats you and who it favours
-- **Prompt by prompt**: every question and answer, with the full text one click away
+- **Prompt by prompt**: every question and answer, filterable by topic and by where you're missing, with the full text one click away
 - **Next steps**: rule-based recommendations, plus sentiment, competitor gaps and the prompts you're missing from
 
 It works with no API keys. Any assistant without a key answers with realistic demo text and fictional rivals, so you can try the whole flow straight away. Add keys to ask the real assistants.
@@ -70,6 +71,16 @@ With no key, after a 6 second timeout (`SOV_INTAKE_TIMEOUT_MS`, up to 8000), on 
 
 Through OpenRouter, the intake asks for strict structured output from hosts that support it (`require_parameters`) and turns reasoning off (`reasoning.effort: "none"`). DeepSeek V4 Flash reasons by default, and the reasoning would use up the whole output budget before any JSON appears. If you override the model with one that has no reasoning switch, OpenRouter finds no host for that setting, so the request is retried once without it.
 
+## Questions, topics and the estimate
+
+After the website, Pip asks what to focus on (skip for a broad check) and how many questions to ask each assistant: 10, 25, 50, 100 or any number up to 100. Casual answers like "about 50" or "max" work.
+
+Broad checks of up to 6 questions use the built-in set. Anything bigger goes to `POST /api/questions`, where the intake model writes the rest in parallel batches of up to 25, each with a different angle: best picks, alternatives, comparisons, beginners, budget and use cases. Every question is cleaned, near-duplicates are dropped, and any question naming your product, its site or a squashed spelling of it ("TrustWallet") is thrown out. With topics, the count is split evenly across them and each topic is written separately. If the writer is slow (`SOV_QUESTIONS_TIMEOUT_MS`, 40 seconds by default), fails or comes back short, templates fill the gap and Pip says if there are fewer distinct questions than you asked for. Every question stays editable on the plan card.
+
+The estimate comes from the average cost and time of real answers from each assistant, with web search on or off (`ANSWER_RATES` in `src/lib/sov/estimate.ts`). It depends only on the number of questions, the assistants you tick and the web search switch, and updates as you change them. Nothing runs until you press **Ask** or say "go ahead".
+
+Big checks run each assistant's questions a few at a time (5 by default). Rate limits and server errors are retried up to three times, honouring `Retry-After`, and a timed-out answer gets one more try. Answers that still fail are listed in the chat and the report and left out of every number. The stream sends a heartbeat every 15 seconds so proxies keep long checks open.
+
 ## Sharing it with a password
 
 Set `SOV_BASIC_AUTH_USER` and `SOV_BASIC_AUTH_PASSWORD` to put the whole app behind HTTP basic auth: every page, API route and asset (`src/proxy.ts`). With either one unset, there's no password. Use a long random password, for example `openssl rand -base64 32`, because anyone with it can run checks on your keys.
@@ -99,7 +110,8 @@ src/
     report/[id]/page.tsx     Dashboard (/report/demo is the sample)
     api/check/route.ts       Runs a check and streams NDJSON events
     api/intake/route.ts      Reads one intake reply with the intake model or the rules
-    api/providers/route.ts   Which assistants are live or demo
+    api/questions/route.ts   Writes the buyer questions for a check (AI writer, then templates)
+    api/providers/route.ts   Which assistants are live or demo, and today's budget
   components/
     check/                   Chat: composer, messages, plan, live run and summary cards
     report/                  Dashboard cards and layout
@@ -112,7 +124,7 @@ src/
     providers/               Provider config and live API adapters, direct or via OpenRouter (plain fetch)
 ```
 
-Runs are saved in the browser's `localStorage` (the 12 most recent). There's no database or account.
+Runs are saved in the browser's `localStorage` (the 12 most recent). Older reports are removed to make room for a big one, and a report too big to save at all stays open until you close the tab. There's no database or account.
 
 ## Scripts
 
