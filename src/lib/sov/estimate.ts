@@ -13,10 +13,10 @@ export type RateTable = Record<ModelId, { search: AnswerRate; plain: AnswerRate 
  * Perplexity always searches, so both of its rates are the same.
  */
 export const ANSWER_RATES: RateTable = {
-  chatgpt: { search: { costUsd: 0.023, seconds: 10 }, plain: { costUsd: 0.0025, seconds: 9 } },
-  claude: { search: { costUsd: 0.012, seconds: 8 }, plain: { costUsd: 0.003, seconds: 5.5 } },
-  gemini: { search: { costUsd: 0.058, seconds: 6 }, plain: { costUsd: 0.0012, seconds: 4.5 } },
-  perplexity: { search: { costUsd: 0.008, seconds: 4 }, plain: { costUsd: 0.008, seconds: 4 } },
+  chatgpt: { search: { costUsd: 0.022, seconds: 13.5 }, plain: { costUsd: 0.0003, seconds: 7 } },
+  claude: { search: { costUsd: 0.012, seconds: 7.5 }, plain: { costUsd: 0.0005, seconds: 5 } },
+  gemini: { search: { costUsd: 0.05, seconds: 6 }, plain: { costUsd: 0.0014, seconds: 4.5 } },
+  perplexity: { search: { costUsd: 0.006, seconds: 8 }, plain: { costUsd: 0.006, seconds: 8 } },
 };
 
 /** Answers each assistant works on at once during a check. */

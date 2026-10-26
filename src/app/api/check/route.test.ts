@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/check/route";
 import { spendLedger } from "@/lib/sov/budget";
-import { ANSWER_RATES } from "@/lib/sov/estimate";
+import { ANSWER_RATES, formatUsd } from "@/lib/sov/estimate";
 
 const question = (i: number) => ({ id: `q${i}`, text: `What's the best CRM for small agencies, take ${i}?`, intent: "best-for" });
 const body = {
@@ -49,7 +49,8 @@ describe("POST /api/check daily budget", () => {
     expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
     const json = await response.json();
     expect(json.code).toBe("daily-budget");
-    expect(json.error).toMatch(/^That check would cost about \$0\.10, but only \$0\.05 of today's \$0\.05 budget is left\./);
+    const estimate = formatUsd(Object.values(ANSWER_RATES).reduce((sum, rate) => sum + rate.search.costUsd, 0));
+    expect(json.error).toMatch(new RegExp(`^That check would cost about \\${estimate}, but only \\$0\\.05 of today's \\$0\\.05 budget is left\\.`));
     expect(spendLedger().reservedUsd).toBe(0);
   });
 
