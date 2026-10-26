@@ -68,8 +68,18 @@ describe("rulesTurn", () => {
     });
   });
 
+  it("reads a bare decline after the competitor word, mid-reply", () => {
+    expect(rulesTurn("product", "Acme, a CRM for small agencies, competitors? not sure, site is acme.io")).toEqual({
+      intent: "answer",
+      values: { product: "Acme", category: "CRM", audience: "small agencies", website: "acme.io" },
+      skips: ["competitors"],
+    });
+    expect(rulesTurn("product", "Acme, a CRM for small agencies. Competitors: no idea").skips).toEqual(["competitors"]);
+  });
+
   it("doesn't read a competitor list as a decline", () => {
     expect(rulesTurn("product", "Acme, a CRM for small agencies. Competitors are HubSpot and Pipedrive").skips).toBeUndefined();
+    expect(rulesTurn("product", "Acme, the CRM that beats competitors, for small agencies").skips).toBeUndefined();
   });
 
   it("leaves dotted product names and tech terms alone", () => {

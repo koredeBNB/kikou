@@ -107,12 +107,21 @@ export function isNonAnswer(input: string): boolean {
   return NON_ANSWER_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-const COMPETITOR_CLAUSE = /[^.!;,\n]*\b(?:competitors?|competition|rivals?)\b[^.!;,\n]*/gi;
+const COMPETITOR_WORD = /\b(?:competitors?|competition|rivals?)\b/i;
+const COMPETITOR_CLAUSE = new RegExp(`[^.!;,\\n]*${COMPETITOR_WORD.source}[^.!;,\\n]*`, "gi");
+
+/** "Not sure about competitors", or a decline right after the word: "competitors? not sure". */
+function declinesCompetitors(clause: string): boolean {
+  if (isNonAnswer(clause)) return true;
+  const word = COMPETITOR_WORD.exec(clause);
+  const after = word ? clause.slice(word.index + word[0].length).replace(/^[\s?:\-–—]+/, "") : "";
+  return after !== "" && isNonAnswer(after);
+}
 
 /** Takes a competitor decline ("… Competitors? Honestly not sure") out of a longer reply. */
 export function takeCompetitorSkip(input: string): { text: string; skipped: boolean } {
   for (const match of input.matchAll(COMPETITOR_CLAUSE)) {
-    if (!isNonAnswer(match[0])) continue;
+    if (!declinesCompetitors(match[0])) continue;
     const text = `${input.slice(0, match.index)}${input.slice(match.index + match[0].length)}`
       .replace(/\s*[,;]\s*(?=[,;.!]|$)/g, "")
       .replace(/([.!])\s*[.!]+/g, "$1")
