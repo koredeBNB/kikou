@@ -5,6 +5,7 @@ import { MODEL_LABELS, type ModelId } from "@/lib/sov/types";
 export interface LiveResult {
   text: string;
   citations: string[];
+  costUsd?: number;
 }
 
 const TIMEOUT_MS = 60_000;
@@ -153,7 +154,10 @@ async function askOpenRouter(
     });
   const fromResults = asArray(data.search_results).map((r) => asString(r.url));
   const citations = [listed, annotated, fromResults].map(unique).find((urls) => urls.length) ?? [];
-  return { text: asString(message.content), citations };
+  const result: LiveResult = { text: asString(message.content), citations };
+  const cost = ((data.usage ?? {}) as Json).cost;
+  if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) result.costUsd = cost;
+  return result;
 }
 
 export async function askLive(

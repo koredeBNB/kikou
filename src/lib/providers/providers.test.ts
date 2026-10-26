@@ -99,8 +99,15 @@ describe("resolveProviders", () => {
       source: "live",
       modelName: "anthropic/claude-haiku-5.5",
       via: "openrouter",
+      webSearch: true,
     });
-    expect(status.find((s) => s.id === "perplexity")).toEqual({ id: "perplexity", label: "Perplexity", source: "live", modelName: "sonar" });
+    expect(status.find((s) => s.id === "perplexity")).toEqual({
+      id: "perplexity",
+      label: "Perplexity",
+      source: "live",
+      modelName: "sonar",
+      webSearch: true,
+    });
     expect(JSON.stringify(status)).not.toContain("or-secret");
   });
 
@@ -111,6 +118,7 @@ describe("resolveProviders", () => {
       label: "ChatGPT",
       source: "live",
       modelName: "gpt-4.1-mini",
+      webSearch: false,
     });
     expect(status.find((s) => s.id === "claude")?.source).toBe("mock");
     expect(JSON.stringify(status)).not.toContain("sk-secret");
@@ -309,6 +317,21 @@ describe("askLive", () => {
     expect((await askLive("perplexity", "q", viaOpenRouter("perplexity/sonar", true), annotated.impl)).citations).toEqual([
       "https://a.com/1",
     ]);
+  });
+
+  it("reports what OpenRouter charged for each answer", async () => {
+    const { impl } = fakeFetch({
+      choices: [{ message: { content: "Acme" } }],
+      usage: { prompt_tokens: 120, completion_tokens: 480, cost: 0.0187 },
+    });
+    const result = await askLive("claude", "q", viaOpenRouter("anthropic/claude-haiku-5.5", true), impl);
+    expect(result.costUsd).toBe(0.0187);
+  });
+
+  it("leaves the cost unset when the provider doesn't report one", async () => {
+    const { impl } = fakeFetch({ choices: [{ message: { content: "Acme" } }], usage: { cost: "n/a" } });
+    const result = await askLive("claude", "q", viaOpenRouter("anthropic/claude-haiku-5.5"), impl);
+    expect(result).not.toHaveProperty("costUsd");
   });
 
   it("names the assistant, not the key, when OpenRouter fails", async () => {

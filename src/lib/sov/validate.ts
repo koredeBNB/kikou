@@ -50,6 +50,7 @@ export function validateCheckRequest(input: unknown): ValidationResult {
       },
       questions,
       models,
+      webSearch: body.webSearch !== false,
     },
   };
 }

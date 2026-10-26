@@ -27,6 +27,13 @@ describe("validateCheckRequest", () => {
     expect(validateCheckRequest(null)).toMatchObject({ ok: false });
   });
 
+  it("keeps the check's web search switch, which defaults to on", () => {
+    const off = validateCheckRequest({ ...valid, webSearch: false });
+    expect(off.ok && off.value.webSearch).toBe(false);
+    const unset = validateCheckRequest({ ...valid, webSearch: "nope" });
+    expect(unset.ok && unset.value.webSearch).toBe(true);
+  });
+
   it("caps question count and ignores unknown models", () => {
     const many = Array.from({ length: 11 }, (_, i) => ({ id: `q${i}`, text: `Q${i}?` }));
     expect(validateCheckRequest({ ...valid, questions: many })).toMatchObject({ ok: false });

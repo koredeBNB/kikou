@@ -103,6 +103,7 @@ export interface ProviderStatus {
   source: AnswerSource;
   modelName?: string;
   via?: "openrouter";
+  webSearch?: boolean;
 }
 
 export function providerStatus(env: Env): ProviderStatus[] {
@@ -112,6 +113,7 @@ export function providerStatus(env: Env): ProviderStatus[] {
     if (!setting.live) return { id, label: MODEL_LABELS[id], source: "mock" };
     const status: ProviderStatus = { id, label: MODEL_LABELS[id], source: "live", modelName: setting.modelName };
     if (setting.via) status.via = setting.via;
+    status.webSearch = setting.webSearch;
     return status;
   });
 }

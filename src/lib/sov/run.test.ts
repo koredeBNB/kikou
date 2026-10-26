@@ -44,6 +44,37 @@ describe("runCheck", () => {
     expect(events.at(-1)?.type).toBe("done");
   });
 
+  it("passes on what each live answer cost and totals the check when done", async () => {
+    const ok = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "Try **Acme**." } }], usage: { cost: 0.01 } }), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    const events = await collect({ env: { OPENROUTER_API_KEY: "or" }, fetchImpl: ok, models: ["claude", "gemini"] });
+    const answers = events.flatMap((e) => (e.type === "answer" ? [e.answer] : []));
+    expect(answers).toHaveLength(6);
+    expect(answers.every((a) => a.costUsd === 0.01)).toBe(true);
+    const done = events.at(-1);
+    expect(done?.type === "done" && done.costUsd).toBeCloseTo(0.06, 6);
+  });
+
+  it("costs nothing in demo mode", async () => {
+    const done = (await collect()).at(-1);
+    expect(done?.type === "done" && done.costUsd).toBe(0);
+  });
+
+  it("can switch web search off for one check", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const capture = (async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const env = { OPENROUTER_API_KEY: "or" };
+    await collect({ env, fetchImpl: capture, models: ["chatgpt"], questions: questions.slice(0, 1) });
+    expect(bodies[0].plugins).toEqual([{ id: "web" }]);
+    await collect({ env, fetchImpl: capture, models: ["chatgpt"], questions: questions.slice(0, 1), webSearch: false });
+    expect(bodies[1].plugins).toBeUndefined();
+  });
+
   it("marks live answers as live", async () => {
     const ok = (async () =>
       new Response(JSON.stringify({ choices: [{ message: { content: "Try **Acme**." } }], citations: [] }), {

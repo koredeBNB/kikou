@@ -41,6 +41,8 @@ export interface ModelAnswer {
   citations: string[];
   source: AnswerSource;
   latencyMs: number;
+  /** What the provider charged for this answer, when it says. */
+  costUsd?: number;
 }
 
 export type Sentiment = "positive" | "neutral" | "negative";
