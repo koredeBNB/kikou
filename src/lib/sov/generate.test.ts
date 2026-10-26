@@ -106,11 +106,25 @@ describe("classifyIntent", () => {
 describe("cleanGeneratedQuestions", () => {
   it("strips numbering, bullets and quotes, and ends every question with a question mark", () => {
     expect(
+      cleanGeneratedQuestions(["1. Which crypto wallet is best for staking?", "- “What's a safe wallet for a first NFT”"], { brief: wallet }),
+    ).toEqual(["Which crypto wallet is best for staking?", "What's a safe wallet for a first NFT?"]);
+  });
+
+  it("ends plain requests with a full stop, unless they also ask something", () => {
+    expect(
       cleanGeneratedQuestions(
-        ["1. Which crypto wallet is best for staking?", "- “What's a safe wallet for a first NFT”", "Recommend a wallet for DeFi farming."],
+        [
+          "Recommend a wallet for DeFi farming",
+          "Compare the fees of the top three crypto wallets for small trades?",
+          "Help me pick a wallet for my parents, which one is simplest?",
+        ],
         { brief: wallet },
       ),
-    ).toEqual(["Which crypto wallet is best for staking?", "What's a safe wallet for a first NFT?", "Recommend a wallet for DeFi farming?"]);
+    ).toEqual([
+      "Recommend a wallet for DeFi farming.",
+      "Compare the fees of the top three crypto wallets for small trades.",
+      "Help me pick a wallet for my parents, which one is simplest?",
+    ]);
   });
 
   it("never keeps a question that names the product, its site or its squashed name", () => {

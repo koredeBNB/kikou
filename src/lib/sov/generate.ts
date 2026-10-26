@@ -85,11 +85,16 @@ function similarity(a: Set<string>, b: Set<string>): number {
 const LEAD = /^(?:(?:\d{1,3}[.):]|[-*•–—]|q\d{1,3}[.):])\s*)+/i;
 const QUOTES = /^["'“”‘’`]+|["'“”‘’`]+$/g;
 
+const REQUEST = /^(recommend|compare|list|suggest|name|rank|tell|give|show|help|find|pick|point)\b/i;
+const ASKS = /\b(which|what|who|whom|whose|how|where|why|when|should|is|are|can|could|do|does|would|will)\b/i;
+
+/** Requests like “Compare the fees of…” end with a full stop; everything else is a question. */
 function tidy(raw: string): string {
   let text = raw.replace(/\s+/g, " ").trim().replace(LEAD, "").trim().replace(QUOTES, "").trim();
-  text = text.replace(/[.!;:,\s]+$/, "");
+  text = text.replace(/[.!?;:,\s]+$/, "");
   if (!text) return "";
-  if (!text.endsWith("?")) text += "?";
+  const request = REQUEST.test(text) && !ASKS.test(text.replace(REQUEST, ""));
+  text += request ? "." : "?";
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 

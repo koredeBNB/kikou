@@ -113,3 +113,11 @@ export function settleBudget(reservation: Reservation, actualUsd: number, now = 
   if (reservation.day === ledger.day) ledger.reservedUsd = Math.max(0, ledger.reservedUsd - reservation.amountUsd);
   ledger.spentUsd += Math.max(0, actualUsd);
 }
+
+/** The client's heads-up before a check the server would refuse. Null when it fits or there's no budget. */
+export function budgetNote(costUsd: number, budget: { limitUsd: number; remainingUsd: number } | null): string | null {
+  if (!budget || costUsd <= budget.remainingUsd) return null;
+  const limit = formatUsd(budget.limitUsd);
+  if (budget.remainingUsd < 0.01) return `Today's ${limit} budget is used up. It resets at midnight UTC.`;
+  return `That's more than the ${formatUsd(budget.remainingUsd)} left in today's ${limit} budget. Try fewer questions or assistants, or turn off web search.`;
+}

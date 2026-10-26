@@ -29,8 +29,11 @@ import type { ProviderStatus } from "@/lib/providers/config";
 import { applyTurn, emptyIntake, questionCount, toBrief, topicExamples } from "@/lib/intake/flow";
 import { requestIntake } from "@/lib/intake/request";
 import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/types";
-import { MAX_QUESTIONS } from "@/lib/sov/generate";
+import { budgetNote } from "@/lib/sov/budget";
+import { canSwitchSearch, estimateFor, estimateLine } from "@/lib/sov/estimate";
+import { classifyIntent, MAX_QUESTIONS } from "@/lib/sov/generate";
 import { readPlanReply } from "@/lib/sov/intake";
+import { planMessage, writingMessage } from "@/lib/sov/plan-copy";
 import { normalizeBrief } from "@/lib/sov/questions";
 import { requestQuestions } from "@/lib/sov/request-questions";
 import { buildReport } from "@/lib/sov/report";
@@ -40,7 +43,7 @@ import type { CheckRequest } from "@/lib/sov/events";
 
 type Step = IntakeField | "review" | "running" | "done";
 
-type PipItem = { kind: "text"; text: string; mood?: PipMood } | { kind: "plan" | "run" | "summary" };
+type PipItem = { kind: "text"; text: string; mood?: PipMood } | { kind: "plan" | "estimate" | "run" | "summary" };
 type Message = { id: string; role: "user"; text: string } | ({ id: string; role: "pip" } & PipItem);
 
 interface RunContext {
@@ -48,6 +51,18 @@ interface RunContext {
   brief: Brief;
   questions: Question[];
   models: ModelId[];
+}
+
+type Budget = { limitUsd: number; remainingUsd: number } | null;
+type ProvidersResponse = { providers: ProviderStatus[]; budget?: Budget };
+
+/** The assistants, and what's left of today's budget, which changes as checks run. */
+async function fetchProviders(): Promise<ProvidersResponse> {
+  try {
+    return (await (await fetch("/api/providers", { cache: "no-store" })).json()) as ProvidersResponse;
+  } catch {
+    return { providers: MODEL_IDS.map((id) => ({ id, label: MODEL_LABELS[id], source: "mock" as const })), budget: null };
+  }
 }
 
 const EXAMPLES = [
@@ -100,7 +115,7 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-const typingDelay = (item: PipItem) => (item.kind === "text" ? Math.min(450 + item.text.length * 6, 1100) : 350);
+const typingDelay = (item: PipItem) => (item.kind === "text" ? Math.min(450 + item.text.length * 6, 1100) : item.kind === "estimate" ? 900 : 350);
 const isIntakeStep = (step: Step): step is IntakeField => (INTAKE_FIELDS as readonly string[]).includes(step);
 
 function guessDomain(product: string): string | null {
@@ -118,20 +133,28 @@ export function CheckExperience() {
   const [planned, setPlanned] = useState<PlannedQuestion[]>([]);
   const [models, setModels] = useState(ALL_MODELS);
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
+  const [budget, setBudget] = useState<Budget>(null);
+  const [webSearch, setWebSearch] = useState(true);
   const [input, setInput] = useState("");
   const [runCtx, setRunCtx] = useState<RunContext | null>(null);
   const [openAnswer, setOpenAnswer] = useState<ModelAnswer | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const runIdRef = useRef<string | null>(null);
 
+  const loadProviders = useCallback(async (): Promise<ProvidersResponse> => {
+    const data = await fetchProviders();
+    setProviders(data.providers);
+    setBudget(data.budget ?? null);
+    return data;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/providers")
-      .then((r) => r.json())
-      .then((data: { providers: ProviderStatus[] }) => !cancelled && setProviders(data.providers))
-      .catch(() =>
-        !cancelled && setProviders(MODEL_IDS.map((id) => ({ id, label: MODEL_LABELS[id], source: "mock" as const }))),
-      );
+    fetchProviders().then((data) => {
+      if (cancelled) return;
+      setProviders(data.providers);
+      setBudget(data.budget ?? null);
+    });
     return () => {
       cancelled = true;
     };
@@ -155,11 +178,24 @@ export function CheckExperience() {
 
   const enabledQuestions = useMemo(() => planned.filter((p) => p.enabled).map((p) => p.question), [planned]);
   const selectedModels = useMemo(() => MODEL_IDS.filter((m) => models[m]), [models]);
+  const estimate = useMemo(
+    () => estimateFor({ questions: enabledQuestions.length, models: selectedModels, providers, webSearch }),
+    [enabledQuestions.length, selectedModels, providers, webSearch],
+  );
+  const overBudget = budgetNote(estimate.costUsd, budget);
+  const searchSwitch = canSwitchSearch(selectedModels, providers);
+  const estimateText = [
+    estimateLine({ questions: enabledQuestions.length, assistants: selectedModels.length, estimate, ask: !overBudget }),
+    overBudget,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const onFinish = useCallback(
     async (state: RunState, request: CheckRequest) => {
       const id = runIdRef.current;
       if (!id) return;
+      void loadProviders();
       const { brief, questions } = request;
       if (state.answers.length === 0) {
         setStep("review");
@@ -204,7 +240,7 @@ export function CheckExperience() {
         { kind: "summary" },
       );
     },
-    [say],
+    [say, loadProviders],
   );
 
   const { state: run, start, reset: resetRun } = useCheckRun(onFinish);
@@ -226,20 +262,20 @@ export function CheckExperience() {
     async (brief: Brief, count: number) => {
       const normalized = normalizeBrief(brief);
       setDraft(normalized);
+      const writing = writingMessage({ count, topics: normalized.topics });
+      if (writing) await say({ kind: "text", mood: "thinking", text: writing });
       setTyping(true);
-      const { questions } = await requestQuestions(normalized, count);
+      const [{ questions, requested }] = await Promise.all([requestQuestions(normalized, count), loadProviders()]);
       setTyping(false);
       setPlanned(questions.map((question) => ({ question, enabled: true })));
       setStep("review");
       await say(
-        {
-          kind: "text",
-          text: `Here's my plan. I'll ask each assistant these ${questions.length} questions, the way a real buyer would. None of them name **${normalized.product}**, so every recommendation is unprompted.`,
-        },
+        { kind: "text", text: planMessage({ product: normalized.product, questions: questions.length, requested, topics: normalized.topics }) },
         { kind: "plan" },
+        { kind: "estimate" },
       );
     },
-    [say],
+    [say, loadProviders],
   );
 
   const handleIntake = async (field: IntakeField, text: string, state: IntakeState) => {
@@ -262,6 +298,10 @@ export function CheckExperience() {
     if (reply.kind === "start") {
       if (enabledQuestions.length === 0 || selectedModels.length === 0) {
         await say({ kind: "text", text: "Tick at least one question and one assistant on the plan, then we're off." });
+        return;
+      }
+      if (overBudget) {
+        await say({ kind: "text", text: overBudget });
         return;
       }
       await startRun({ echo: false });
@@ -294,6 +334,7 @@ export function CheckExperience() {
     setIntake(emptyIntake());
     setPlanned([]);
     setModels(ALL_MODELS);
+    setWebSearch(true);
     setStep("product");
     setInput("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -319,7 +360,7 @@ export function CheckExperience() {
   };
 
   const startRun = async ({ echo = true }: { echo?: boolean } = {}) => {
-    if (enabledQuestions.length === 0 || selectedModels.length === 0) return;
+    if (enabledQuestions.length === 0 || selectedModels.length === 0 || overBudget) return;
     const id = newRunId();
     const brief = normalizeBrief(draft);
     runIdRef.current = id;
@@ -327,7 +368,7 @@ export function CheckExperience() {
     setStep("running");
     if (echo) append({ id: uid(), role: "user", text: "Let's go!" });
     await say({ kind: "text", mood: "thinking", text: "Off I go! I'll drop each answer in as it lands." }, { kind: "run" });
-    void start({ brief, questions: enabledQuestions, models: selectedModels });
+    void start({ brief, questions: enabledQuestions, models: selectedModels, webSearch });
   };
 
   const quickReplies: string[] = (() => {
@@ -347,6 +388,8 @@ export function CheckExperience() {
         return [topicExamples(intake.category).join(", "), "Broad check"];
       case "count":
         return ["10", "25", "50", "100"];
+      case "review":
+        return overBudget ? [] : ["Go ahead"];
       default:
         return [];
     }
@@ -365,6 +408,13 @@ export function CheckExperience() {
         </PipMessage>
       );
     }
+    if (message.kind === "estimate") {
+      return (
+        <PipMessage key={message.id}>
+          <Rich text={estimateText} />
+        </PipMessage>
+      );
+    }
     if (message.kind === "plan") {
       return (
         <PipMessage key={message.id} wide>
@@ -374,9 +424,24 @@ export function CheckExperience() {
             models={models}
             providers={providers}
             locked={step !== "review"}
+            webSearch={webSearch}
+            canSwitchSearch={searchSwitch}
+            estimate={estimate}
+            budget={budget}
+            budgetNote={overBudget}
             onToggleQuestion={(id) => setPlanned((prev) => prev.map((p) => (p.question.id === id ? { ...p, enabled: !p.enabled } : p)))}
             onRemoveQuestion={(id) => setPlanned((prev) => prev.filter((p) => p.question.id !== id))}
+            onEditQuestion={(id, text) =>
+              setPlanned((prev) =>
+                prev.map((p) =>
+                  p.question.id === id && p.question.text !== text
+                    ? { ...p, question: { ...p.question, text, intent: p.question.intent === "custom" ? "custom" : classifyIntent(text) } }
+                    : p,
+                ),
+              )
+            }
             onToggleModel={(id) => setModels((prev) => ({ ...prev, [id]: !prev[id] }))}
+            onToggleWebSearch={setWebSearch}
             onStart={() => startRun()}
           />
         </PipMessage>

@@ -3,8 +3,11 @@ import {
   ANSWER_RATES,
   PER_MODEL_CONCURRENCY,
   answerCost,
+  canSwitchSearch,
   estimateCheck,
+  estimateFor,
   estimateLine,
+  estimateSummary,
   formatDuration,
   formatUsd,
   type EstimateModel,
@@ -70,6 +73,30 @@ describe("estimateCheck", () => {
   });
 });
 
+describe("estimateFor", () => {
+  const providers = [
+    { id: "chatgpt" as const, label: "ChatGPT", source: "live" as const, webSearch: true },
+    { id: "claude" as const, label: "Claude", source: "live" as const, webSearch: false },
+    { id: "gemini" as const, label: "Gemini", source: "mock" as const },
+  ];
+
+  it("estimates the picked assistants from what the server says about each", () => {
+    const estimate = estimateFor({ questions: 10, models: ["chatgpt", "claude", "gemini"], providers, webSearch: true }, flat);
+    expect(estimate.answers).toBe(30);
+    expect(estimate.costUsd).toBeCloseTo(10 * 0.03 + 10 * 0.003, 6);
+  });
+
+  it("treats assistants the server hasn't described yet as demo ones", () => {
+    expect(estimateFor({ questions: 10, models: ["perplexity"], providers: [], webSearch: true }, flat).costUsd).toBe(0);
+  });
+
+  it("only offers the web search switch when a picked live assistant would search", () => {
+    expect(canSwitchSearch(["chatgpt", "gemini"], providers)).toBe(true);
+    expect(canSwitchSearch(["claude", "gemini"], providers)).toBe(false);
+    expect(canSwitchSearch(["perplexity"], [{ id: "perplexity", label: "Perplexity", source: "live", webSearch: true }])).toBe(false);
+  });
+});
+
 describe("formatting", () => {
   it("formats dollars to the cent", () => {
     expect(formatUsd(11.5)).toBe("$11.50");
@@ -99,6 +126,17 @@ describe("estimateLine", () => {
     expect(estimateLine({ questions: 1, assistants: 1, estimate: { answers: 1, costUsd: 0.004, seconds: 8, perModel: [] } })).toBe(
       "1 question to 1 AI is 1 answer. That's less than a cent and under a minute. Go ahead?",
     );
+  });
+
+  it("can leave out the question, for when the check can't go ahead", () => {
+    expect(estimateLine({ questions: 100, assistants: 4, estimate, ask: false })).toBe(
+      "100 questions to 4 AIs is 400 answers. That's about $11.50 and roughly 12 minutes.",
+    );
+  });
+
+  it("sums it up in one line for the plan card", () => {
+    expect(estimateSummary(estimate)).toBe("400 answers · about $11.50 · roughly 12 minutes");
+    expect(estimateSummary({ answers: 24, costUsd: 0, seconds: 10, perModel: [] })).toBe("24 answers · free (demo) · under a minute");
   });
 
   it("says demo answers are free", () => {

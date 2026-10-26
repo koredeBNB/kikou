@@ -1,6 +1,6 @@
 import { providerStatus } from "@/lib/providers/config";
 import { reserveBudget, settleBudget } from "@/lib/sov/budget";
-import { estimateCheck } from "@/lib/sov/estimate";
+import { estimateFor } from "@/lib/sov/estimate";
 import { runCheck, type CostMeter } from "@/lib/sov/run";
 import { validateCheckRequest } from "@/lib/sov/validate";
 
@@ -12,12 +12,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
 
   const { questions, models, webSearch } = parsed.value;
-  const statuses = providerStatus(process.env).filter((p) => models.includes(p.id));
-  const estimate = estimateCheck({
-    questions: questions.length,
-    models: statuses.map((p) => ({ id: p.id, live: p.source === "live", webSearch: p.webSearch ?? false })),
-    webSearch,
-  });
+  const estimate = estimateFor({ questions: questions.length, models, providers: providerStatus(process.env), webSearch });
   const claim = reserveBudget(process.env, estimate.costUsd);
   if (!claim.ok) {
     return Response.json(

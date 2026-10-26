@@ -90,7 +90,7 @@ export function RunCard({
 
       <div className="flex flex-wrap gap-2 text-sm">
         <span className="rounded-full bg-meadow-100 px-3 py-1 font-semibold text-meadow-700">
-          {brief.product} mentioned in {live.product.mentions}/{run.answers.length || 0}
+          {brief.product} mentioned in {live.product.mentions}/{live.answers.length}
         </span>
         {topRival && (
           <span className="rounded-full bg-sky-100 px-3 py-1 font-semibold text-sky-700">Most mentioned rival: {topRival.brand}</span>

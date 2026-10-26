@@ -1,3 +1,4 @@
+import type { ProviderStatus } from "@/lib/providers/config";
 import type { AnswerSource, ModelId } from "@/lib/sov/types";
 
 export interface AnswerRate {
@@ -68,6 +69,30 @@ export function estimateCheck(input: EstimateInput, rates: RateTable = ANSWER_RA
   };
 }
 
+/** The estimate for a plan, from the server's description of each assistant. Unknown ones count as demo. */
+export function estimateFor(
+  { questions, models, providers, webSearch }: { questions: number; models: ModelId[]; providers: ProviderStatus[]; webSearch: boolean },
+  rates: RateTable = ANSWER_RATES,
+): Estimate {
+  const described = new Map(providers.map((p) => [p.id, p]));
+  return estimateCheck(
+    {
+      questions,
+      models: models.map((id) => {
+        const status = described.get(id);
+        return { id, live: status?.source === "live", webSearch: status?.webSearch ?? false };
+      }),
+      webSearch,
+    },
+    rates,
+  );
+}
+
+/** Whether the check's web search switch would change anything for these assistants. */
+export function canSwitchSearch(models: ModelId[], providers: ProviderStatus[]): boolean {
+  return providers.some((p) => models.includes(p.id) && p.id !== "perplexity" && p.source === "live" && p.webSearch);
+}
+
 /** What one answer cost: the provider's own figure when it reports one, otherwise the assistant's average. */
 export function answerCost(
   answer: { model: ModelId; source: AnswerSource; costUsd?: number },
@@ -92,10 +117,27 @@ export function formatDuration(seconds: number): string {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Pip's line before a check: "100 questions to 4 AIs is 400 answers. That's about $11.50 and roughly 12 minutes. Go ahead?" */
-export function estimateLine({ questions, assistants, estimate }: { questions: number; assistants: number; estimate: Estimate }): string {
+export function estimateLine({
+  questions,
+  assistants,
+  estimate,
+  ask = true,
+}: {
+  questions: number;
+  assistants: number;
+  estimate: Estimate;
+  ask?: boolean;
+}): string {
   const sizing = `${plural(questions, "question")} to ${assistants} AI${assistants === 1 ? "" : "s"} is ${plural(estimate.answers, "answer")}.`;
   const time = formatDuration(estimate.seconds);
-  if (estimate.costUsd === 0) return `${sizing} They're demo answers, so it's free and takes ${time}. Go ahead?`;
+  const question = ask ? " Go ahead?" : "";
+  if (estimate.costUsd === 0) return `${sizing} They're demo answers, so it's free and takes ${time}.${question}`;
   const cost = estimate.costUsd < 0.01 ? "less than a cent" : `about ${formatUsd(estimate.costUsd)}`;
-  return `${sizing} That's ${cost} and ${time}. Go ahead?`;
+  return `${sizing} That's ${cost} and ${time}.${question}`;
+}
+
+/** The plan card's summary: "400 answers · about $9.05 · roughly 5 minutes". */
+export function estimateSummary(estimate: Estimate): string {
+  const cost = estimate.costUsd === 0 ? "free (demo)" : estimate.costUsd < 0.01 ? "under a cent" : `about ${formatUsd(estimate.costUsd)}`;
+  return `${plural(estimate.answers, "answer")} · ${cost} · ${formatDuration(estimate.seconds)}`;
 }

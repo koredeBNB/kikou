@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetStatus, dailyBudget, reserveBudget, settleBudget, type SpendLedger } from "@/lib/sov/budget";
+import { budgetNote, budgetStatus, dailyBudget, reserveBudget, settleBudget, type SpendLedger } from "@/lib/sov/budget";
 
 const at = (iso: string) => new Date(iso);
 const ledger = (): SpendLedger => ({ day: "", spentUsd: 0, reservedUsd: 0 });
@@ -78,5 +78,19 @@ describe("reserveBudget and settleBudget", () => {
     const store = ledger();
     for (let i = 0; i < 20; i++) expect(reserveBudget({ SOV_MAX_SPEND_PER_DAY: "off" }, 50, now, store).ok).toBe(true);
     expect(budgetStatus({ SOV_MAX_SPEND_PER_DAY: "off" }, now, store)).toBeNull();
+  });
+});
+
+describe("budgetNote", () => {
+  it("says nothing when the check fits, or there's no budget", () => {
+    expect(budgetNote(3, { limitUsd: 20, remainingUsd: 4.2 })).toBeNull();
+    expect(budgetNote(30, null)).toBeNull();
+  });
+
+  it("says what's left when the estimate is more than today's budget allows", () => {
+    expect(budgetNote(9.05, { limitUsd: 20, remainingUsd: 4.2 })).toBe(
+      "That's more than the $4.20 left in today's $20.00 budget. Try fewer questions or assistants, or turn off web search.",
+    );
+    expect(budgetNote(1, { limitUsd: 20, remainingUsd: 0 })).toBe("Today's $20.00 budget is used up. It resets at midnight UTC.");
   });
 });
