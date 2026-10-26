@@ -35,6 +35,36 @@ describe("rulesTurn", () => {
     expect(rulesTurn("competitors", "Planta, Greg")).toEqual({ intent: "answer", values: { competitors: ["Planta", "Greg"] } });
   });
 
+  it("pulls a website out of an all-in-one reply instead of mixing it into other fields", () => {
+    expect(rulesTurn("product", "It's Fernly, a plant care app for new plant parents, site's fernly.app")).toEqual({
+      intent: "answer",
+      values: { product: "Fernly", category: "plant care app", audience: "new plant parents", website: "fernly.app" },
+    });
+    expect(rulesTurn("product", "Fernly (fernly.app), a plant care app")).toEqual({
+      intent: "answer",
+      values: { product: "Fernly", category: "plant care app", website: "fernly.app" },
+    });
+    expect(rulesTurn("category", "a plant care app for new plant parents. Our website is https://www.fernly.app/")).toEqual({
+      intent: "answer",
+      values: { category: "plant care app", audience: "new plant parents", website: "fernly.app" },
+    });
+    expect(rulesTurn("audience", "new plant parents, and our site is fernly.app")).toEqual({
+      intent: "answer",
+      values: { audience: "new plant parents", website: "fernly.app" },
+    });
+  });
+
+  it("leaves dotted product names and tech terms alone", () => {
+    expect(rulesTurn("product", "monday.com, a work OS for teams")).toEqual({
+      intent: "answer",
+      values: { product: "monday.com", category: "work OS", audience: "teams" },
+    });
+    expect(rulesTurn("product", "Acme, a Node.js library for developers")).toEqual({
+      intent: "answer",
+      values: { product: "Acme", category: "Node.js library", audience: "developers" },
+    });
+  });
+
   it("reads a website", () => {
     expect(rulesTurn("website", "it's fernly.app")).toEqual({ intent: "answer", values: { website: "fernly.app" } });
   });

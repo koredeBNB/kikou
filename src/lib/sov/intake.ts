@@ -30,6 +30,21 @@ function stripLeads(value: string, lead: RegExp): string {
   return text;
 }
 
+const WEBSITE_CLAUSE = new RegExp(
+  String.raw`(?:\s*[,;(]\s*|\.\s+|\s+[-–—]\s+|\s+)(?:and\s+)?(?:(?:our|my|the|its)\s+)?(?:(?:web\s*)?site|url|domain|homepage)?(?:'s|\s+is|:)?\s*(?:at\s+|on\s+)?` +
+    String.raw`((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s),;]*)?)\s*\)?(?=\s*(?:[,;]|\.?\s*$|\.\s))`,
+  "i",
+);
+
+/** Splits a website clause ("…, site's fernly.app") out of a longer reply. A leading domain is left alone, as it's usually the name. */
+export function takeWebsite(input: string): { text: string; website?: string } {
+  const match = WEBSITE_CLAUSE.exec(input);
+  const website = match ? siteDomain(match[1]) : null;
+  if (!match || !website) return { text: input };
+  const text = `${input.slice(0, match.index)}${input.slice(match.index + match[0].length)}`.trim();
+  return text ? { text, website } : { text: input };
+}
+
 /** Reads "Acme, a CRM for small agencies" style intros into brief fields. */
 export function parseIntro(input: string): IntroFields {
   const text = clean(input);
