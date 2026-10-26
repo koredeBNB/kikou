@@ -99,6 +99,13 @@ describe("discoverBrands with everyday words as headings", () => {
     const text = [...junk, ...brands].map((name) => `- **${name}**: details.`).join("\n");
     expect(discoverBrands([text, text], [])).toEqual(brands);
   });
+
+  it("skips headings about one side of a brand, slash-joined criteria and testing advice", () => {
+    const junk = ["Solana NFTs", "Ethereum mainnet", "Bitcoin fees", "Solana ecosystem", "Provider/Liquidity Fees", "Speed/Reliability", "Test first"];
+    const brands = ["Akash Network", "Lightning Network", "Binance app", "Kraken Wallet", "OKX Web3", "Rocket Pool"];
+    const text = [...junk, ...brands].map((name) => `- **${name}**: details.`).join("\n");
+    expect(discoverBrands([text, text], [])).toEqual(brands);
+  });
 });
 
 describe("discoverBrands on real assistant answers", () => {

@@ -67,10 +67,15 @@ const GENERIC_FIRST_WORDS = new Set([
   "verify",
   "download",
   "avoid",
+  "test",
+  "testing",
 ]);
 
 /** “Ledger or Trezor”, “Protect your seed phrase”: choices and advice, not names. */
 const NOT_A_NAME = /\s(?:or|and)\s|\b(?:you|your|yours|my|our|we)\b|\*/i;
+
+/** “Solana NFTs”, “Bitcoin fees”: one side of a brand, not a separate brand. */
+const FACET_TAILS = new Set("nft nfts mainnet testnet ecosystem fee fees".split(" "));
 
 /** Criteria that answers use as headings. A name made only of these (and connectors) isn't a brand. */
 const GENERIC_TERMS = new Set([
@@ -101,7 +106,7 @@ const GENERIC_TERMS = new Set([
 const isGenericPhrase = (name: string) =>
   name
     .toLowerCase()
-    .split(/\s+/)
+    .split(/[\s/]+/)
     .every((word) => GENERIC_TERMS.has(word.replace(/[^\p{L}\p{N}&-]/gu, "")));
 
 function candidateFrom(item: string): string | null {
@@ -115,6 +120,7 @@ function candidateFrom(item: string): string | null {
   if (!/^[\p{Lu}\p{N}]/u.test(name)) return null;
   if (/^\d+$/.test(name) || DESCRIPTOR.test(name)) return null;
   if (GENERIC_FIRST_WORDS.has(words[0].toLowerCase()) || NOT_A_NAME.test(name) || isGenericPhrase(name)) return null;
+  if (words.length > 1 && FACET_TAILS.has(words[words.length - 1].toLowerCase())) return null;
   return name;
 }
 
