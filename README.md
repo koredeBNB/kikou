@@ -35,7 +35,38 @@ Copy `.env.example` to `.env.local` and add any keys you have, then restart `pnp
 
 Web search is off by default for ChatGPT, Claude and Gemini, and Perplexity always searches. Turning it on gets you cited sources, but costs more per check. OpenAI web search needs a search model such as `gpt-4o-mini-search-preview`. Set `SOV_FORCE_MOCK=true` to ignore all keys.
 
+### One key for everything: OpenRouter
+
+Set `OPENROUTER_API_KEY` and every assistant without its own key runs through [OpenRouter](https://openrouter.ai). A direct key always wins for that assistant.
+
+| Assistant  | OpenRouter model (default)     | Override                      |
+| ---------- | ------------------------------ | ----------------------------- |
+| ChatGPT    | `openai/gpt-6-luna`            | `OPENROUTER_CHATGPT_MODEL`    |
+| Claude     | `anthropic/claude-haiku-5.5`   | `OPENROUTER_CLAUDE_MODEL`     |
+| Gemini     | `google/gemini-3.1-flash-lite` | `OPENROUTER_GEMINI_MODEL`     |
+| Perplexity | `perplexity/sonar`             | `OPENROUTER_PERPLEXITY_MODEL` |
+
+The `*_WEB_SEARCH` flags above also apply through OpenRouter, using its web plugin. Perplexity still searches on its own. `OPENROUTER_BASE_URL` points everything at another OpenAI-compatible gateway.
+
 Keys stay on the server. The browser only learns whether each assistant is live, and which model it uses.
+
+## How Pip reads your replies
+
+With a key, each intake reply goes to a small, fast model through `POST /api/intake`. The model gets Pip's question, the answers so far and the reply, and returns structured JSON: whether you answered, skipped or were unclear, the cleaned values, and Pip's next message. One reply can fill several steps ("It's Fernly, a plant care app for new plant parents, site's fernly.app"), and Pip skips the steps already answered.
+
+The model only reads and phrases. It never touches the questions or the scoring:
+
+- The output is checked against a schema, and values are cleaned with the same rules as the built-in parser. Product, competitor and website values must appear in your reply, so the model can't invent them.
+- The flow is fixed. Pip only uses the model's message when it asks for the step the app picks next. Messages with links or markup are dropped.
+- Replies are capped at 500 characters and passed as quoted data, with instructions to ignore any requests inside them.
+
+With no key, after a 4 second timeout, on an error, or when the output doesn't validate, Pip falls back to the rule-based parser in `src/lib/sov/intake.ts`, so demo mode works the same.
+
+| Setting                   | Default                                                         |
+| ------------------------- | --------------------------------------------------------------- |
+| Model, first key found    | OpenRouter `deepseek/deepseek-v3.2`, then OpenAI `gpt-4.1-nano`, Anthropic `claude-haiku-4-5`, Gemini `gemini-2.5-flash-lite` |
+| Overrides                 | `OPENROUTER_INTAKE_MODEL`, `OPENAI_INTAKE_MODEL`, `ANTHROPIC_INTAKE_MODEL`, `GEMINI_INTAKE_MODEL` |
+| `SOV_INTAKE_RULES=true`   | Always use the rule-based parser, even with keys               |
 
 ## How the scoring works
 
@@ -58,6 +89,7 @@ src/
     page.tsx                 Chat intake (the landing page)
     report/[id]/page.tsx     Dashboard (/report/demo is the sample)
     api/check/route.ts       Runs a check and streams NDJSON events
+    api/intake/route.ts      Reads one intake reply with the intake model or the rules
     api/providers/route.ts   Which assistants are live or demo
   components/
     check/                   Chat: composer, messages, plan, live run and summary cards
@@ -66,8 +98,9 @@ src/
     art/                     Original artwork: Pip, clouds, sky scene, assistant glyphs
     ui/                      shadcn/ui primitives, restyled
   lib/
-    sov/                     Scoring, question generation, mock answers, run engine
-    providers/               Provider config and live API adapters (plain fetch)
+    sov/                     Scoring, question generation, mock answers, run engine, rule-based intake parser
+    intake/                  AI intake: prompt, output schema, model clients, merging into intake state
+    providers/               Provider config and live API adapters, direct or via OpenRouter (plain fetch)
 ```
 
 Runs are saved in the browser's `localStorage` (the 12 most recent). There's no database or account.
