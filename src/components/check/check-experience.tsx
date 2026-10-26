@@ -158,6 +158,14 @@ export function CheckExperience() {
       const { brief, questions } = request;
       if (state.answers.length === 0) {
         setStep("review");
+        if (state.limited && state.failure) {
+          setMessages((prev) => {
+            const last = prev.findLastIndex((m) => m.role === "pip" && m.kind === "run");
+            return last === -1 ? prev : prev.filter((_, i) => i !== last);
+          });
+          await say({ kind: "text", mood: "idle", text: state.failure });
+          return;
+        }
         await say({ kind: "text", mood: "idle", text: `Oh dear, the check didn't finish: ${state.failure ?? "no answers came back"}. Want to try again?` });
         return;
       }

@@ -74,6 +74,8 @@ Through OpenRouter, the intake asks for strict structured output from hosts that
 
 Set `SOV_BASIC_AUTH_USER` and `SOV_BASIC_AUTH_PASSWORD` to put the whole app behind HTTP basic auth: every page, API route and asset (`src/proxy.ts`). With either one unset, there's no password. Use a long random password, for example `openssl rand -base64 32`, because anyone with it can run checks on your keys.
 
+Set `SOV_MAX_CHECKS_PER_DAY` (for example `25`) to cap full checks per UTC day across everyone using the app. Past the cap, `POST /api/check` returns 429 and Pip explains when checks come back. The count is kept in memory, so it starts again when the server restarts. With web search on, a check costs about $0.70 through OpenRouter (up to 10 questions, so a 6-question check is typical), which makes 25 checks roughly $17 a day.
+
 ## How the scoring works
 
 The scoring is deliberately simple so you can explain it to your team. It lives in `src/lib/sov/` and is covered by unit tests.

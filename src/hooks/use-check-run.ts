@@ -16,6 +16,8 @@ export interface RunState {
   total: number;
   elapsedMs: number;
   failure?: string;
+  /** The server refused the check because today's cap is used up; `failure` holds its message. */
+  limited?: boolean;
 }
 
 const INITIAL: RunState = { status: "idle", models: [], answers: [], errors: [], total: 0, elapsedMs: 0 };
@@ -45,6 +47,11 @@ export function useCheckRun(onFinish?: (state: RunState, request: CheckRequest) 
         });
         if (!response.ok || !response.body) {
           const body = await response.json().catch(() => ({}));
+          if (body.code === "daily-limit" && typeof body.error === "string") {
+            update({ ...current, status: "failed", failure: body.error, limited: true });
+            onFinish?.(current, request);
+            return;
+          }
           throw new Error(body.error ?? `The check couldn't start (${response.status}).`);
         }
 
