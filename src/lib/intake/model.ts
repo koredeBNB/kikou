@@ -24,9 +24,9 @@ export type IntakeClient = (
 const MAX_OUTPUT_TOKENS = 400;
 const TOOL_NAME = "record_intake";
 
-/** Cheapest fast, non-reasoning model per provider, in order of preference. */
+/** Cheapest fast model per provider, used without reasoning, in order of preference. */
 const CANDIDATES: { provider: IntakeProvider; keys: string[]; modelVar: string; model: string }[] = [
-  { provider: "openrouter", keys: ["OPENROUTER_API_KEY"], modelVar: "OPENROUTER_INTAKE_MODEL", model: "deepseek/deepseek-v3.2" },
+  { provider: "openrouter", keys: ["OPENROUTER_API_KEY"], modelVar: "OPENROUTER_INTAKE_MODEL", model: "deepseek/deepseek-v4-flash" },
   { provider: "openai", keys: ["OPENAI_API_KEY"], modelVar: "OPENAI_INTAKE_MODEL", model: "gpt-4.1-nano" },
   { provider: "anthropic", keys: ["ANTHROPIC_API_KEY"], modelVar: "ANTHROPIC_INTAKE_MODEL", model: "claude-haiku-4-5" },
   { provider: "gemini", keys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"], modelVar: "GEMINI_INTAKE_MODEL", model: "gemini-2.5-flash-lite" },
@@ -59,8 +59,14 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     body: JSON.stringify(body),
     signal: options.signal,
   });
-  if (!response.ok) throw new Error(`Intake model request failed (${response.status})`);
+  if (!response.ok) throw new RequestFailed(response.status);
   return (await response.json()) as Json;
+}
+
+class RequestFailed extends Error {
+  constructor(readonly status: number) {
+    super(`Intake model request failed (${status})`);
+  }
 }
 
 type Schema = Record<string, unknown>;
@@ -91,19 +97,22 @@ export const callIntakeModel: IntakeClient = async (setting, prompt, options = {
 
   switch (setting.provider) {
     case "openrouter": {
-      const data = await postJson(
-        `${setting.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`,
-        { authorization: `Bearer ${setting.apiKey}`, "x-title": "Meadowlark" },
-        {
-          model: setting.model,
-          messages,
-          response_format: responseFormat,
-          provider: { require_parameters: true },
-          temperature: 0,
-          max_tokens: MAX_OUTPUT_TOKENS,
-        },
-        options,
-      );
+      const url = `${setting.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`;
+      const headers = { authorization: `Bearer ${setting.apiKey}`, "x-title": "Meadowlark" };
+      const body = {
+        model: setting.model,
+        messages,
+        response_format: responseFormat,
+        provider: { require_parameters: true },
+        temperature: 0,
+        max_tokens: MAX_OUTPUT_TOKENS,
+      };
+      // Reasoning models such as DeepSeek V4 Flash think by default and spend the whole output budget before
+      // answering. Models without a reasoning switch have no host that accepts it under require_parameters (404).
+      const data = await postJson(url, headers, { ...body, reasoning: { effort: "none" } }, options).catch((error: unknown) => {
+        if (error instanceof RequestFailed && error.status === 404) return postJson(url, headers, body, options);
+        throw error;
+      });
       return (asArray(data.choices)[0]?.message as Json | undefined)?.content;
     }
     case "openai": {

@@ -64,9 +64,11 @@ With no key, after a 4 second timeout, on an error, or when the output doesn't v
 
 | Setting                   | Default                                                         |
 | ------------------------- | --------------------------------------------------------------- |
-| Model, first key found    | OpenRouter `deepseek/deepseek-v3.2`, then OpenAI `gpt-4.1-nano`, Anthropic `claude-haiku-4-5`, Gemini `gemini-2.5-flash-lite` |
+| Model, first key found    | OpenRouter `deepseek/deepseek-v4-flash`, then OpenAI `gpt-4.1-nano`, Anthropic `claude-haiku-4-5`, Gemini `gemini-2.5-flash-lite` |
 | Overrides                 | `OPENROUTER_INTAKE_MODEL`, `OPENAI_INTAKE_MODEL`, `ANTHROPIC_INTAKE_MODEL`, `GEMINI_INTAKE_MODEL` |
 | `SOV_INTAKE_RULES=true`   | Always use the rule-based parser, even with keys               |
+
+Through OpenRouter, the intake asks for strict structured output from hosts that support it (`require_parameters`) and turns reasoning off (`reasoning.effort: "none"`). DeepSeek V4 Flash reasons by default, and the reasoning would use up the whole output budget before any JSON appears. If you override the model with one that has no reasoning switch, OpenRouter finds no host for that setting, so the request is retried once without it.
 
 ## How the scoring works
 

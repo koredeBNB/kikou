@@ -23,11 +23,11 @@ describe("resolveIntakeModel", () => {
     expect(resolveIntakeModel({})).toBeNull();
   });
 
-  it("prefers OpenRouter with DeepSeek V3.2, overridable", () => {
+  it("prefers OpenRouter with DeepSeek V4 Flash, overridable", () => {
     expect(resolveIntakeModel({ OPENROUTER_API_KEY: "or-key", OPENAI_API_KEY: "sk" })).toEqual({
       provider: "openrouter",
       apiKey: "or-key",
-      model: "deepseek/deepseek-v3.2",
+      model: "deepseek/deepseek-v4-flash",
       baseUrl: "https://openrouter.ai/api/v1",
     });
     expect(resolveIntakeModel({ OPENROUTER_API_KEY: "or-key", OPENROUTER_INTAKE_MODEL: "x/y" })?.model).toBe("x/y");
@@ -50,26 +50,53 @@ describe("callIntakeModel", () => {
   const setting = (patch: Partial<IntakeModelSetting>): IntakeModelSetting => ({
     provider: "openrouter",
     apiKey: "or-key",
-    model: "deepseek/deepseek-v3.2",
+    model: "deepseek/deepseek-v4-flash",
     baseUrl: "https://openrouter.ai/api/v1",
     ...patch,
   });
 
-  it("asks OpenRouter for strict JSON-schema output and reads the message content", async () => {
+  it("asks OpenRouter for strict JSON-schema output with reasoning off and reads the message content", async () => {
     const { impl, calls } = fakeFetch({ choices: [{ message: { content: JSON.stringify(turn) } }] });
     expect(await callIntakeModel(setting({}), prompt, { fetchImpl: impl })).toBe(JSON.stringify(turn));
+    expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(headersOf(calls[0]).get("authorization")).toBe("Bearer or-key");
     expect(bodyOf(calls[0])).toMatchObject({
-      model: "deepseek/deepseek-v3.2",
+      model: "deepseek/deepseek-v4-flash",
       messages: [
         { role: "system", content: prompt.system },
         { role: "user", content: prompt.user },
       ],
       response_format: { type: "json_schema", json_schema: { name: "intake_turn", strict: true, schema: INTAKE_JSON_SCHEMA } },
+      reasoning: { effort: "none" },
       provider: { require_parameters: true },
       temperature: 0,
     });
+  });
+
+  it("retries without the reasoning switch when no OpenRouter host accepts it", async () => {
+    const calls: FetchCall[] = [];
+    const impl = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return calls.length === 1
+        ? new Response(JSON.stringify({ error: { code: 404, message: "No endpoints found that can handle the requested parameters." } }), { status: 404 })
+        : new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(turn) } }] }), { status: 200 });
+    }) as typeof fetch;
+
+    expect(await callIntakeModel(setting({ model: "openai/gpt-4.1-nano" }), prompt, { fetchImpl: impl })).toBe(JSON.stringify(turn));
+    expect(calls).toHaveLength(2);
+    expect(bodyOf(calls[1]).reasoning).toBeUndefined();
+    expect(bodyOf(calls[1])).toMatchObject({
+      model: "openai/gpt-4.1-nano",
+      response_format: { type: "json_schema", json_schema: { strict: true } },
+      provider: { require_parameters: true },
+    });
+  });
+
+  it("doesn't retry OpenRouter on other errors", async () => {
+    const { impl, calls } = fakeFetch({ error: { message: "rate limited" } }, 429);
+    await expect(callIntakeModel(setting({}), prompt, { fetchImpl: impl })).rejects.toThrow(/\(429\)/);
+    expect(calls).toHaveLength(1);
   });
 
   it("uses OpenAI's own endpoint with the same structured output", async () => {
