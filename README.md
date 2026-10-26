@@ -70,6 +70,10 @@ With no key, after a 6 second timeout (`SOV_INTAKE_TIMEOUT_MS`, up to 8000), on 
 
 Through OpenRouter, the intake asks for strict structured output from hosts that support it (`require_parameters`) and turns reasoning off (`reasoning.effort: "none"`). DeepSeek V4 Flash reasons by default, and the reasoning would use up the whole output budget before any JSON appears. If you override the model with one that has no reasoning switch, OpenRouter finds no host for that setting, so the request is retried once without it.
 
+## Sharing it with a password
+
+Set `SOV_BASIC_AUTH_USER` and `SOV_BASIC_AUTH_PASSWORD` to put the whole app behind HTTP basic auth: every page, API route and asset (`src/proxy.ts`). With either one unset, there's no password. Use a long random password, for example `openssl rand -base64 32`, because anyone with it can run checks on your keys.
+
 ## How the scoring works
 
 The scoring is deliberately simple so you can explain it to your team. It lives in `src/lib/sov/` and is covered by unit tests.
@@ -87,6 +91,7 @@ The scoring is deliberately simple so you can explain it to your team. It lives 
 
 ```
 src/
+  proxy.ts                   Optional basic auth in front of everything
   app/
     page.tsx                 Chat intake (the landing page)
     report/[id]/page.tsx     Dashboard (/report/demo is the sample)
