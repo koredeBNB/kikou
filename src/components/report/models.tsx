@@ -86,7 +86,7 @@ function ModelCard({ summary, status, report }: { summary: ModelSummary; status?
               </span>
             ))
           ) : (
-            <span className="text-xs text-ink-soft">No sources cited{summary.source === "live" ? " (web search off)" : ""}</span>
+            <span className="text-xs text-ink-soft">No sources cited</span>
           )}
         </div>
       </div>

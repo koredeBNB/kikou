@@ -33,7 +33,7 @@ Copy `.env.example` to `.env.local` and add any keys you have, then restart `pnp
 | Gemini     | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | `GEMINI_MODEL` (default `gemini-2.5-flash`), `GEMINI_WEB_SEARCH` |
 | Perplexity | `PERPLEXITY_API_KEY`                   | `PERPLEXITY_MODEL` (default `sonar`)                      |
 
-Web search is off by default for ChatGPT, Claude and Gemini, and Perplexity always searches. Turning it on gets you cited sources, but costs more per check. OpenAI web search needs a search model such as `gpt-4o-mini-search-preview`. Set `SOV_FORCE_MOCK=true` to ignore all keys.
+With direct keys, web search is off by default for ChatGPT, Claude and Gemini, and Perplexity always searches. Set `OPENAI_WEB_SEARCH`, `ANTHROPIC_WEB_SEARCH` or `GEMINI_WEB_SEARCH` to `true` to get cited sources, at a higher cost per check. OpenAI web search needs a search model such as `gpt-4o-mini-search-preview`, and Anthropic web search must be enabled for your organisation. Set `SOV_FORCE_MOCK=true` to ignore all keys.
 
 ### One key for everything: OpenRouter
 
@@ -46,7 +46,7 @@ Set `OPENROUTER_API_KEY` and every assistant without its own key runs through [O
 | Gemini     | `google/gemini-3.1-flash-lite` | `OPENROUTER_GEMINI_MODEL`     |
 | Perplexity | `perplexity/sonar`             | `OPENROUTER_PERPLEXITY_MODEL` |
 
-The `*_WEB_SEARCH` flags above also apply through OpenRouter, using its web plugin. Perplexity still searches on its own. `OPENROUTER_BASE_URL` points everything at another OpenAI-compatible gateway.
+Through OpenRouter, ChatGPT, Claude and Gemini search the web by default, like the real assistants. OpenRouter's web plugin uses each provider's own search, and the report reads the sources from the answer's URL citations. Set `OPENAI_WEB_SEARCH`, `ANTHROPIC_WEB_SEARCH` or `GEMINI_WEB_SEARCH` to `false` to turn it off for that assistant. Search costs extra: Gemini's native search is the priciest of the three. Perplexity always searches on its own. `OPENROUTER_BASE_URL` points everything at another OpenAI-compatible gateway.
 
 Keys stay on the server. The browser only learns whether each assistant is live, and which model it uses.
 

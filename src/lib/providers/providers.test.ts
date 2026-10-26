@@ -44,11 +44,34 @@ describe("resolveProviders", () => {
   it("runs every assistant through OpenRouter when only an OpenRouter key is set", () => {
     const providers = resolveProviders({ OPENROUTER_API_KEY: "or-test" });
     expect(providers).toEqual({
-      chatgpt: { live: true, via: "openrouter", apiKey: "or-test", modelName: "openai/gpt-6-luna", webSearch: false, baseUrl: "https://openrouter.ai/api/v1" },
-      claude: { live: true, via: "openrouter", apiKey: "or-test", modelName: "anthropic/claude-haiku-5.5", webSearch: false, baseUrl: "https://openrouter.ai/api/v1" },
-      gemini: { live: true, via: "openrouter", apiKey: "or-test", modelName: "google/gemini-3.1-flash-lite", webSearch: false, baseUrl: "https://openrouter.ai/api/v1" },
+      chatgpt: { live: true, via: "openrouter", apiKey: "or-test", modelName: "openai/gpt-6-luna", webSearch: true, baseUrl: "https://openrouter.ai/api/v1" },
+      claude: { live: true, via: "openrouter", apiKey: "or-test", modelName: "anthropic/claude-haiku-5.5", webSearch: true, baseUrl: "https://openrouter.ai/api/v1" },
+      gemini: { live: true, via: "openrouter", apiKey: "or-test", modelName: "google/gemini-3.1-flash-lite", webSearch: true, baseUrl: "https://openrouter.ai/api/v1" },
       perplexity: { live: true, via: "openrouter", apiKey: "or-test", modelName: "perplexity/sonar", webSearch: true, baseUrl: "https://openrouter.ai/api/v1" },
     });
+  });
+
+  it("lets each *_WEB_SEARCH flag turn OpenRouter web search off", () => {
+    const providers = resolveProviders({
+      OPENROUTER_API_KEY: "or-test",
+      OPENAI_WEB_SEARCH: "false",
+      ANTHROPIC_WEB_SEARCH: "off",
+      GEMINI_WEB_SEARCH: "0",
+    });
+    expect(providers.chatgpt).toMatchObject({ via: "openrouter", webSearch: false });
+    expect(providers.claude).toMatchObject({ via: "openrouter", webSearch: false });
+    expect(providers.gemini).toMatchObject({ via: "openrouter", webSearch: false });
+  });
+
+  it("treats a blank *_WEB_SEARCH flag as unset", () => {
+    const providers = resolveProviders({ OPENROUTER_API_KEY: "or-test", OPENAI_WEB_SEARCH: "", GEMINI_WEB_SEARCH: "  " });
+    expect(providers.chatgpt).toMatchObject({ via: "openrouter", webSearch: true });
+    expect(providers.gemini).toMatchObject({ via: "openrouter", webSearch: true });
+  });
+
+  it("keeps web search off by default for direct keys, which need their own setup", () => {
+    const providers = resolveProviders({ OPENAI_API_KEY: "sk", ANTHROPIC_API_KEY: "ak", GEMINI_API_KEY: "g" });
+    expect([providers.chatgpt, providers.claude, providers.gemini].map((p) => p.live && p.webSearch)).toEqual([false, false, false]);
   });
 
   it("prefers a direct key, and lets each OpenRouter model and web search be overridden", () => {
@@ -223,6 +246,44 @@ describe("askLive", () => {
     const { impl, calls } = fakeFetch({ choices: [{ message: { content: "ok" } }] });
     await askLive("gemini", "q", viaOpenRouter("google/gemini-3.1-flash-lite", true), impl);
     expect(bodyOf(calls[0]).plugins).toEqual([{ id: "web" }]);
+  });
+
+  it("reads each assistant's web search sources through OpenRouter", async () => {
+    // Shapes from live OpenRouter web plugin responses.
+    const cite = (url: string, title: string) => ({ type: "url_citation", url_citation: { url, title, start_index: 0, end_index: 10 } });
+    const openai = fakeFetch({
+      choices: [{ message: { content: "Plausible", annotations: [cite("https://plausible.io/docs?utm_source=openai", "Plausible docs")] } }],
+    });
+    expect((await askLive("chatgpt", "q", viaOpenRouter("openai/gpt-6-luna", true), openai.impl)).citations).toEqual([
+      "https://plausible.io/docs?utm_source=openai",
+    ]);
+
+    const claude = fakeFetch({
+      choices: [{ message: { content: "Plausible", annotations: [cite("https://seline.com/blog/web-analytics-tools", "6 Best Website Analytics Tools")] } }],
+    });
+    expect((await askLive("claude", "q", viaOpenRouter("anthropic/claude-haiku-5.5", true), claude.impl)).citations).toEqual([
+      "https://seline.com/blog/web-analytics-tools",
+    ]);
+
+    const gemini = fakeFetch({
+      choices: [
+        {
+          message: {
+            content: "Plausible",
+            annotations: [
+              cite("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEFR5", "plausible.io"),
+              cite("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG3eP", "quantummetric.com"),
+              cite("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH3Of", "Best tools for 2026"),
+            ],
+          },
+        },
+      ],
+    });
+    expect((await askLive("gemini", "q", viaOpenRouter("google/gemini-3.1-flash-lite", true), gemini.impl)).citations).toEqual([
+      "https://plausible.io",
+      "https://quantummetric.com",
+      "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH3Of",
+    ]);
   });
 
   it("keeps Perplexity's own citation order through OpenRouter", async () => {

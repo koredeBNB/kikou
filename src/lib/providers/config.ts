@@ -76,8 +76,11 @@ export function resolveProviders(env: Env): Record<ModelId, ProviderSetting> {
       const def = PROVIDERS[id];
       const apiKey = def.keys.map((k) => env[k]?.trim()).find(Boolean);
       if (forceMock || (!apiKey && !openRouterKey)) return [id, { live: false }];
-      const searchFlag = def.webSearchVar ? env[def.webSearchVar] : undefined;
-      const webSearch = searchFlag === undefined ? def.webSearchDefault : truthy(searchFlag);
+      const searchFlag = (def.webSearchVar && env[def.webSearchVar]?.trim()) || undefined;
+      // OpenRouter's web plugin uses each provider's native search with no setup. Direct APIs need more
+      // (an OpenAI search model, web search enabled for the Anthropic organisation), so they stay opt-in.
+      const searchDefault = apiKey ? def.webSearchDefault : true;
+      const webSearch = searchFlag === undefined ? searchDefault : truthy(searchFlag);
       if (apiKey) return [id, { live: true, apiKey, modelName: env[def.modelVar]?.trim() || def.defaultModel, webSearch }];
       return [
         id,

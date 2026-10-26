@@ -78,6 +78,12 @@ async function askAnthropic(question: string, s: LiveSetting, f: typeof fetch, s
 
 const DOMAIN_TITLE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
 
+/** Gemini grounding URIs are opaque Google redirects; the title usually carries the source domain. */
+function groundedUrl(uri: string, title: string): string {
+  const domain = title.trim();
+  return uri.includes("vertexaisearch.cloud.google.com") && DOMAIN_TITLE.test(domain) ? `https://${domain}` : uri;
+}
+
 async function askGemini(question: string, s: LiveSetting, f: typeof fetch, signal?: AbortSignal): Promise<LiveResult> {
   const body: Json = { contents: [{ role: "user", parts: [{ text: question }] }] };
   if (s.webSearch) body.tools = [{ google_search: {} }];
@@ -95,11 +101,7 @@ async function askGemini(question: string, s: LiveSetting, f: typeof fetch, sign
   const citations = chunks
     .map((chunk) => {
       const web = (chunk.web ?? {}) as Json;
-      const uri = asString(web.uri);
-      const title = asString(web.title).trim();
-      // Grounding URIs are opaque Google redirects; the title usually carries the source domain.
-      if (uri.includes("vertexaisearch.cloud.google.com") && DOMAIN_TITLE.test(title)) return `https://${title}`;
-      return uri;
+      return groundedUrl(asString(web.uri), asString(web.title));
     })
     .filter(Boolean);
   return { text: parts.map((p) => asString(p.text)).join(""), citations };
@@ -144,7 +146,10 @@ async function askOpenRouter(
   const listed = Array.isArray(data.citations) ? (data.citations as unknown[]).map(asString) : [];
   const annotated = asArray(message.annotations)
     .filter((a) => a.type === "url_citation")
-    .map((a) => asString((a.url_citation as Json | undefined)?.url));
+    .map((a) => {
+      const cite = (a.url_citation ?? {}) as Json;
+      return groundedUrl(asString(cite.url), asString(cite.title));
+    });
   const fromResults = asArray(data.search_results).map((r) => asString(r.url));
   const citations = [listed, annotated, fromResults].map(unique).find((urls) => urls.length) ?? [];
   return { text: asString(message.content), citations };
