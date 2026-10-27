@@ -78,7 +78,7 @@ export function ReadabilityCard({ view, onRecheck }: { view: SiteAuditView; onRe
       tint="bg-sun-100 text-[#a86f12]"
       title="AI readability"
       description="Can assistants actually read your site? Pip checked it the way their crawlers do."
-      action={<CardAction view={view} onRecheck={onRecheck} />}
+      action={<CardAction view={view} onRecheck={onRecheck} className="hidden sm:flex" />}
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -88,7 +88,12 @@ export function ReadabilityCard({ view, onRecheck }: { view: SiteAuditView; onRe
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
         >
-          {view.status === "done" && <AuditResult audit={view.audit} />}
+          {view.status === "done" && (
+            <>
+              <CardAction view={view} onRecheck={onRecheck} className="mb-4 justify-between sm:hidden" />
+              <AuditResult audit={view.audit} />
+            </>
+          )}
           {view.status === "running" && <Progress site={view.site} progress={view.progress} />}
           {view.status === "failed" && <Failed site={view.site} message={view.message} onRetry={onRecheck} />}
           {view.status === "no-site" && <NoSite />}
@@ -98,26 +103,30 @@ export function ReadabilityCard({ view, onRecheck }: { view: SiteAuditView; onRe
   );
 }
 
-function CardAction({ view, onRecheck }: { view: SiteAuditView; onRecheck?: () => void }) {
+function CardAction({ view, onRecheck, className }: { view: SiteAuditView; onRecheck?: () => void; className?: string }) {
   if (view.status === "running") {
     return (
-      <Badge variant="sky" className="h-6 gap-1.5 px-2.5">
-        <span className="size-1.5 animate-pulse rounded-full bg-sky-700" />
-        Checking
-      </Badge>
+      <div className={className}>
+        <Badge variant="sky" className="h-6 gap-1.5 px-2.5">
+          <span className="size-1.5 animate-pulse rounded-full bg-sky-700" />
+          Checking
+        </Badge>
+      </div>
     );
   }
   if (view.status !== "done") return null;
   if (view.sample) {
     return (
-      <Badge variant="outline" className="h-6 bg-white/70 px-2.5">
-        Sample site
-      </Badge>
+      <div className={className}>
+        <Badge variant="outline" className="h-6 bg-white/70 px-2.5">
+          Sample site
+        </Badge>
+      </div>
     );
   }
   return (
-    <div className="flex items-center gap-2">
-      <span className="hidden text-xs text-ink-soft sm:inline">Checked {checkedAgo(view.audit.checkedAt)}</span>
+    <div className={cn("flex items-center gap-2", className)}>
+      <span className="text-xs text-ink-soft">Checked {checkedAgo(view.audit.checkedAt)}</span>
       {onRecheck && (
         <Button size="xs" variant="outline" className="bg-white/70" onClick={onRecheck}>
           <Icon icon={RefreshIcon} />
