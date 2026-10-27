@@ -8,6 +8,7 @@
 - **Cited sources**: which domains the assistants trust, including your site and rivals' sites
 - **Assistant by assistant**: how each one treats you and who it favours
 - **Prompt by prompt**: every question and answer, filterable by topic and by where you're missing, with the full text one click away
+- **AI readability**: a grade for how well AI crawlers can read your own site, with the fixes that matter most
 - **Next steps**: rule-based recommendations, plus sentiment, competitor gaps and the prompts you're missing from
 
 It works with no API keys. Any assistant without a key answers with realistic demo text and fictional rivals, so you can try the whole flow straight away. Add keys to ask the real assistants.
@@ -115,7 +116,7 @@ Spending is capped per UTC day across everyone using the app: $20 by default, or
 
 Web lookups while drafting a brief book what they cost to the same daily budget, and stop once less than $0.05 of it is left. Like checks, they need Redis on Vercel.
 
-Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour), intake replies and rival reviews (150 an hour between them) and web lookups (20 an hour) have their own limits; over those, Pip quietly falls back to templates, the built-in parser, the rules' list of rivals or asking what the brand is. `SOV_CHECKS_PER_HOUR=off` removes all four limits.
+Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour), intake replies and rival reviews (150 an hour between them) and web lookups (20 an hour) have their own limits; over those, Pip quietly falls back to templates, the built-in parser, the rules' list of rivals or asking what the brand is. Site audits are limited to 20 an hour per visitor and 30 an hour per site from everyone together, so Kioku can't be pointed at someone else's site over and over. `SOV_CHECKS_PER_HOUR=off` removes all of these limits.
 
 ## Deploy to Vercel
 
@@ -147,6 +148,27 @@ The scoring is deliberately simple so you can explain it to your team. It lives 
 - **Sources** are the provider's citations plus links written into the answer, with tracking parameters such as `utm_source` removed, deduplicated per answer and grouped by domain. Citations of any of the brand's sites, subdomains included, count as its own.
 - **Sentiment** is a light word list around each mention with negation handling. It's a direction, not a verdict.
 
+## AI readability audit
+
+The report's **AI readability** section grades how well AI crawlers can read the brand's main website, out of 100. It costs nothing: no AI calls, just ordinary web requests from the server (`POST /api/audit`, which streams its progress as NDJSON). A report runs the audit the first time it opens and saves it with the run; **Check again** runs it afresh. Most sites take a few seconds.
+
+| Area | Points | What Pip checks |
+| --- | --- | --- |
+| Crawler access | 35 | robots.txt rules for each AI crawler, plus one homepage request carrying each crawler's name to catch firewalls and CDN bot blocking |
+| Readable without JavaScript | 30 | Words in the raw HTML of each page (AI crawlers don't run JavaScript), empty app shells, titles, descriptions and headings |
+| Structured data | 20 | Organization markup that names the brand, with a logo and profiles, plus WebSite, Product, Article, FAQ and similar types |
+| Discovery files | 15 | A sitemap (and whether robots.txt points to it), canonical tags and `/llms.txt` |
+
+Grades are A (90+), B (75+), C (60+), D (40+) and F. Search crawlers (OAI-SearchBot, Claude-SearchBot, Googlebot, PerplexityBot) carry the weight, because blocking one stops that assistant citing you in live answers. Blocking a training crawler (GPTBot, ClaudeBot, Google-Extended) barely counts and is shown as a fair choice. The fixes are ranked by the points they cost, with copyable robots.txt lines, Organization JSON-LD filled in from the brief and a starter llms.txt. The worst one or two also join Pip's next steps.
+
+How Kioku's crawler behaves:
+
+- It calls itself `KiokuBot` and obeys robots.txt for every page it reads: up to 12 pages, a few at a time. Those are the homepage, the pages the check's answers cited, then pricing, comparison, docs and similar pages from the homepage's links and the sitemap. When robots.txt keeps it out, only crawler access is graded.
+- The exceptions are robots.txt itself, one homepage request as a normal browser (if that's refused too, the site is refusing Kioku's server and the audit says so), and the one homepage request per AI crawler. Those requests come from Kioku's servers, not the crawlers' real addresses. When the site refuses Kioku's own crawler as well, refusals of AI crawlers are marked unconfirmed rather than blocked.
+- It only fetches public http and https addresses on the standard ports, checks every redirect, and refuses private, loopback and cloud metadata addresses, even when a domain resolves to one. Each page gets 8 seconds and 2 MB, and the whole audit about 45 seconds.
+
+Version 1 doesn't run JavaScript, so it shows what a crawler gets rather than comparing it with what a browser shows. The code lives in `src/lib/audit/`.
+
 ## Project layout
 
 ```
@@ -162,6 +184,7 @@ src/
     api/intake/route.ts      Reads one step-by-step intake reply with the intake model or the rules
     api/questions/route.ts   Writes the buyer questions for a check (AI writer, then templates)
     api/brands/route.ts      Checks the rivals found in a check's answers: drops non-rivals, folds product lines
+    api/audit/route.ts       Audits the brand's site for AI readability and streams the grade as NDJSON
     api/providers/route.ts   Which assistants are live or demo, and today's budget
   components/
     check/                   Chat: composer, messages, plan, live run and summary cards
@@ -171,6 +194,7 @@ src/
     ui/                      shadcn/ui primitives, restyled
   lib/
     sov/                     Scoring, question generation, mock answers, answering and batching, budget, rate limits
+    audit/                   AI readability: guarded fetcher, robots.txt, HTML reading, page sampling, grading
     store/                   Run state, spend ledger and counters: Upstash Redis, or in-process for local use
     intake/                  AI intake: brief drafting and corrections, prompts, output schemas, model clients, intake state
     providers/               Provider config and live API adapters, direct or via OpenRouter (plain fetch)
