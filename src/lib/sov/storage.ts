@@ -1,4 +1,5 @@
 import type { ProviderStatus } from "@/lib/providers/config";
+import type { BrandReview } from "@/lib/sov/brand-review";
 import type { Brief, ModelAnswer, ModelId, Question } from "@/lib/sov/types";
 
 export interface RunError {
@@ -16,6 +17,8 @@ export interface StoredRun {
   answers: ModelAnswer[];
   errors: RunError[];
   elapsedMs: number;
+  /** Runs saved before the model checked their rivals get this when their report is first opened. */
+  brandReview?: BrandReview;
 }
 
 // The keys predate the rename to Kioku; changing them would orphan every saved report.
@@ -65,6 +68,21 @@ export function saveRun(run: StoredRun): boolean {
 }
 
 export const unsavedRun = (id: string): StoredRun | null => unsaved.get(id) ?? null;
+
+/** Rewrites a run that's already saved, keeping its place in the history. Returns false when it isn't in storage. */
+export function updateRun(run: StoredRun): boolean {
+  if (unsaved.has(run.id)) {
+    unsaved.set(run.id, run);
+    return false;
+  }
+  try {
+    if (localStorage.getItem(runKey(run.id)) === null) return false;
+    localStorage.setItem(runKey(run.id), JSON.stringify(run));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function loadRun(id: string): StoredRun | null {
   const pending = unsaved.get(id);

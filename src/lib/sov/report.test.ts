@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeAnswer, buildReport } from "@/lib/sov/report";
+import { analyzeAnswer, brandReviewInput, buildReport } from "@/lib/sov/report";
 import type { Brief, ModelAnswer, Question } from "@/lib/sov/types";
 
 const brief: Brief = {
@@ -287,5 +287,43 @@ describe("buildReport", () => {
     expect(close.mentions).toBe(2);
     expect(named.product.mentions).toBe(3);
     expect(named.prompts.find((p) => p.question.id === "q3")?.cells.chatgpt).toMatchObject({ rank: 1 });
+  });
+});
+
+describe("buildReport with the model's review of the rivals", () => {
+  const wallet: Brief = { product: "MetaMask", category: "crypto wallet", audience: "", competitors: ["Phantom"] };
+  const walletQuestions: Question[] = [{ id: "q1", text: "What's the best crypto wallet?", intent: "best-for" }];
+  const walletAnswers = [
+    answer("q1", "claude", "1. **Solana** – fast chain; Phantom is its wallet.\n2. **OKX Web3 Wallet** – multichain.\n3. **MetaMask** – the default."),
+    answer("q1", "gemini", "- **Solana**: cheap fees.\n- **OKX Web3 Wallet**: swaps built in.\n- **Ledger** – hardware."),
+    answer("q1", "chatgpt", "- **Ledger**: keeps keys offline.\n- **OKX Wallet**: in the exchange app.\n- **OKX Wallet** again."),
+    answer("q1", "perplexity", "1. **OKX Wallet** – a Web3 wallet.\n2. **MetaMask** – browser wallet."),
+  ];
+  const review = { reviewed: ["Solana", "OKX Web3 Wallet", "Ledger", "OKX Wallet"], drop: ["Solana"], merge: { "OKX Web3 Wallet": "OKX Wallet" } };
+
+  it("asks about the names the rules found, with the item each came from", () => {
+    expect(brandReviewInput(wallet, walletAnswers)).toEqual({
+      product: "MetaMask",
+      category: "crypto wallet",
+      competitors: ["Phantom"],
+      candidates: [
+        { name: "Solana", context: "**Solana** – fast chain; Phantom is its wallet." },
+        { name: "OKX Web3 Wallet", context: "**OKX Web3 Wallet** – multichain." },
+        { name: "Ledger", context: "**Ledger** – hardware." },
+        { name: "OKX Wallet", context: "**OKX Wallet**: in the exchange app." },
+      ],
+    });
+    expect(brandReviewInput(wallet, [answer("q1", "claude", "MetaMask is the default.")])).toBeNull();
+  });
+
+  it("drops non-rivals and counts product lines as their brand", () => {
+    const before = buildReport({ brief: wallet, questions: walletQuestions, answers: walletAnswers });
+    expect(before.brands.map((b) => b.brand)).toEqual(expect.arrayContaining(["Solana", "OKX Web3 Wallet"]));
+
+    const after = buildReport({ brief: wallet, questions: walletQuestions, answers: walletAnswers, review });
+    expect(after.brands.map((b) => b.brand)).not.toContain("Solana");
+    expect(after.brands.map((b) => b.brand)).not.toContain("OKX Web3 Wallet");
+    expect(after.brands.find((b) => b.brand === "OKX Wallet")?.mentions).toBe(4);
+    expect(after.product.shareOfVoice).toBeGreaterThan(before.product.shareOfVoice);
   });
 });

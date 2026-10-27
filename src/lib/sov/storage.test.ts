@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { INDEX_KEY, listRuns, loadRun, runKey, saveRun, unsavedRun, type StoredRun } from "@/lib/sov/storage";
+import { INDEX_KEY, listRuns, loadRun, runKey, saveRun, unsavedRun, updateRun, type StoredRun } from "@/lib/sov/storage";
 
 /** A localStorage stand-in that throws like a browser once `quota` characters are stored. */
 function fakeStorage(quota: number) {
@@ -66,5 +66,25 @@ describe("saveRun", () => {
     expect(unsavedRun("keep")).toBeNull();
     expect(listRuns().map((r) => r.id)).toEqual(["keep"]);
     expect(JSON.parse(storage.getItem(INDEX_KEY) ?? "[]")).toHaveLength(1);
+  });
+});
+
+describe("updateRun", () => {
+  const review = { reviewed: ["Solana"], drop: ["Solana"], merge: {} };
+
+  it("rewrites a saved run without moving it up the history", () => {
+    saveRun(run("a", 100));
+    saveRun(run("b", 100));
+    expect(updateRun({ ...run("a", 100), brandReview: review })).toBe(true);
+    expect(loadRun("a")?.brandReview).toEqual(review);
+    expect(listRuns().map((r) => r.id)).toEqual(["b", "a"]);
+  });
+
+  it("updates a run kept in memory, and leaves runs that aren't saved alone", () => {
+    saveRun(run("huge", 20_000));
+    expect(updateRun({ ...run("huge", 20_000), brandReview: review })).toBe(false);
+    expect(loadRun("huge")?.brandReview).toEqual(review);
+    expect(updateRun({ ...run("gone", 100), brandReview: review })).toBe(false);
+    expect(loadRun("gone")).toBeNull();
   });
 });
