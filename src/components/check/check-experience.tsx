@@ -16,6 +16,7 @@ import { Pip, type PipMood } from "@/components/art/pip";
 import { SkyScene } from "@/components/art/sky-scene";
 import { BrandMark } from "@/components/brand-mark";
 import { Composer } from "@/components/check/composer";
+import { BriefCard } from "@/components/check/brief-card";
 import { PipMessage, QuickReplies, TypingMessage, UserMessage } from "@/components/check/messages";
 import { PlanCard, type PlannedQuestion } from "@/components/check/plan-card";
 import { RunCard } from "@/components/check/run-card";
@@ -26,13 +27,28 @@ import { useCheckRun, type RunState } from "@/hooks/use-check-run";
 import { useThrottled } from "@/hooks/use-throttled";
 import { ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
-import { applyTurn, emptyIntake, questionCount, toBrief, topicExamples } from "@/lib/intake/flow";
-import { requestIntake } from "@/lib/intake/request";
+import { MAX_EARLIER, type BriefDraft, type Identified } from "@/lib/intake/brief";
+import {
+  acceptDraft,
+  acceptedLine,
+  ambiguousLine,
+  applyTurn,
+  BRIEF_COPY,
+  draftIntake,
+  draftLine,
+  emptyIntake,
+  lookingUpLine,
+  questionCount,
+  toBrief,
+  topicExamples,
+  unknownLine,
+} from "@/lib/intake/flow";
+import { requestIdentify, requestIntake, requestLookup, requestRevision } from "@/lib/intake/request";
 import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/types";
 import { budgetNote } from "@/lib/sov/budget";
 import { canSwitchSearch, estimateFor, estimateLine } from "@/lib/sov/estimate";
 import { classifyIntent, MAX_QUESTIONS } from "@/lib/sov/generate";
-import { readPlanReply } from "@/lib/sov/intake";
+import { isAgreement, isRejection, readPlanReply } from "@/lib/sov/intake";
 import { planMessage, writingMessage } from "@/lib/sov/plan-copy";
 import { normalizeBrief } from "@/lib/sov/questions";
 import { requestQuestions } from "@/lib/sov/request-questions";
@@ -41,10 +57,28 @@ import { newRunId, saveRun } from "@/lib/sov/storage";
 import { MODEL_IDS, MODEL_LABELS, type Brief, type ModelAnswer, type ModelId, type Question } from "@/lib/sov/types";
 import type { CheckRequest } from "@/lib/sov/events";
 
-type Step = IntakeField | "review" | "running" | "done";
+/** "confirm": Pip drafted the brief and waits for the user to confirm or correct it. */
+type Step = IntakeField | "confirm" | "review" | "running" | "done";
 
-type PipItem = { kind: "text"; text: string; mood?: PipMood } | { kind: "plan" | "estimate" | "run" | "summary" };
+type PipItem =
+  | { kind: "text"; text: string; mood?: PipMood }
+  | { kind: "brief"; brief: BriefDraft }
+  | { kind: "plan" | "estimate" | "run" | "summary" };
 type Message = { id: string; role: "user"; text: string } | ({ id: string; role: "pip" } & PipItem);
+
+/** Working out which brand the user means, before there's a brief to confirm. */
+interface BrandSearch {
+  name?: string;
+  topics: string[];
+  count?: number;
+  /** The user's earlier replies about the brand, when Pip had to ask. */
+  earlier: string[];
+  /** What an ambiguous name could mean, offered as quick replies. */
+  options: string[];
+  lookedUp: boolean;
+}
+
+const NEW_SEARCH: BrandSearch = { topics: [], earlier: [], options: [], lookedUp: false };
 
 interface RunContext {
   id: string;
@@ -65,11 +99,7 @@ async function fetchProviders(): Promise<ProvidersResponse> {
   }
 }
 
-const EXAMPLES = [
-  "Fernly, a plant care app for new plant parents",
-  "Thimble — project tracker for small design studios",
-  "Acme, a CRM for small agencies",
-];
+const EXAMPLES = ["BNB Chain, focusing on RWA, trading and AI", "Notion", "Fernly, a plant care app for new plant parents"];
 
 const HOW_IT_WORKS = [
   { icon: BubbleChatQuestionIcon, title: "Real buyer questions", body: "Unbranded, so every mention is earned" },
@@ -78,14 +108,15 @@ const HOW_IT_WORKS = [
 ];
 
 const PLACEHOLDERS: Record<Step, string> = {
-  product: "Tell Pip about your product, e.g. “Acme, a CRM for small agencies”",
+  product: "Name your brand, e.g. “BNB Chain, focusing on RWA and AI”",
   category: "e.g. CRM, plant care app, running shoes",
   audience: "e.g. small agencies, new plant parents",
   competitors: "e.g. HubSpot, Pipedrive, Close",
   website: "e.g. acme.com",
   topics: "e.g. pricing, security, integrations",
   count: "e.g. 25, or “max”",
-  review: "Add your own buyer question…",
+  confirm: "e.g. “looks right” or “drop Solana, add Base”",
+  review: "Add a buyer question, or change the brief…",
   running: "Pip is listening to the assistants…",
   done: "Check another product…",
 };
@@ -97,6 +128,11 @@ const ALL_MODELS = Object.fromEntries(MODEL_IDS.map((m) => [m, true])) as Record
 let counter = 0;
 const uid = () => `m${++counter}`;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Milliseconds since it was started, for typing pauses that already waited on the network. */
+const stopwatch = () => {
+  const start = Date.now();
+  return () => Date.now() - start;
+};
 
 function Rich({ text }: { text: string }) {
   const parts = text.split(/\*\*(.+?)\*\*/g);
@@ -118,6 +154,12 @@ function Rich({ text }: { text: string }) {
 const typingDelay = (item: PipItem) => (item.kind === "text" ? Math.min(450 + item.text.length * 6, 1100) : item.kind === "estimate" ? 900 : 350);
 const isIntakeStep = (step: Step): step is IntakeField => (INTAKE_FIELDS as readonly string[]).includes(step);
 
+const isPlanItem = (m: Message) => m.role === "pip" && (m.kind === "plan" || m.kind === "estimate");
+const sameList = (a: string[] = [], b: string[] = []) => a.join("\n").toLowerCase() === b.join("\n").toLowerCase();
+/** The questions never name the product, its rivals or its site, so only these fields need new ones. */
+const changesQuestions = (a: Brief, b: Brief) =>
+  a.category.toLowerCase() !== b.category.toLowerCase() || a.audience.toLowerCase() !== b.audience.toLowerCase() || !sameList(a.topics, b.topics);
+
 function guessDomain(product: string): string | null {
   const slug = product.toLowerCase().replace(/[^a-z0-9]/g, "");
   return slug.length >= 3 && slug.length <= 20 ? `${slug}.com` : null;
@@ -130,6 +172,8 @@ export function CheckExperience() {
   const [step, setStep] = useState<Step>("product");
   const [draft, setDraft] = useState<Brief>(EMPTY_BRIEF);
   const [intake, setIntake] = useState<IntakeState>(emptyIntake);
+  const [brand, setBrand] = useState<BrandSearch>(NEW_SEARCH);
+  const [proposed, setProposed] = useState<BriefDraft | null>(null);
   const [planned, setPlanned] = useState<PlannedQuestion[]>([]);
   const [models, setModels] = useState(ALL_MODELS);
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
@@ -258,8 +302,9 @@ export function CheckExperience() {
     return () => cancelAnimationFrame(id);
   }, [messages.length, typing, run.answers.length]);
 
+  /** Writes the question plan and shows it below the chat. `keep` holds the user's own questions when rewriting. */
   const goReview = useCallback(
-    async (brief: Brief, count: number) => {
+    async (brief: Brief, count: number, keep: PlannedQuestion[] = []) => {
       const normalized = normalizeBrief(brief);
       setDraft(normalized);
       const writing = writingMessage({ count, topics: normalized.topics });
@@ -267,7 +312,8 @@ export function CheckExperience() {
       setTyping(true);
       const [{ questions, requested }] = await Promise.all([requestQuestions(normalized, count), loadProviders()]);
       setTyping(false);
-      setPlanned(questions.map((question) => ({ question, enabled: true })));
+      setPlanned([...questions.slice(0, MAX_QUESTIONS - keep.length).map((question) => ({ question, enabled: true })), ...keep]);
+      setMessages((prev) => prev.filter((m) => !isPlanItem(m)));
       setStep("review");
       await say(
         { kind: "text", text: planMessage({ product: normalized.product, questions: questions.length, requested, topics: normalized.topics }) },
@@ -280,17 +326,135 @@ export function CheckExperience() {
 
   const handleIntake = async (field: IntakeField, text: string, state: IntakeState) => {
     setTyping(true);
-    const started = Date.now();
+    const elapsed = stopwatch();
     const { turn } = await requestIntake({ field, reply: text, state });
     const { state: nextState, next, messages: lines } = applyTurn(state, field, turn);
     setIntake(nextState);
     await speak(
       lines.map((line) => ({ kind: "text" as const, ...line })),
-      Date.now() - started,
+      elapsed(),
     );
     setTyping(false);
     if (next === "review") await goReview(toBrief(nextState), questionCount(nextState));
     else setStep(next);
+  };
+
+  /** Carries on with the step-by-step questions, reading this reply as what kind of product it is. */
+  const resumeRules = async (text: string, search: BrandSearch) => {
+    setBrand(NEW_SEARCH);
+    if (!search.name) return handleIntake("product", text, emptyIntake());
+    await handleIntake("category", text, { ...emptyIntake(), product: search.name, topics: search.topics, count: search.count });
+  };
+
+  const showDraft = async (brief: BriefDraft, text: string, count: number | undefined, waited: number) => {
+    setBrand(NEW_SEARCH);
+    setProposed(brief);
+    setIntake(draftIntake(brief, count));
+    await speak([{ kind: "text", mood: "happy", text }, { kind: "brief", brief }], waited);
+    setStep("confirm");
+  };
+
+  const settleBrand = async (
+    result: Identified,
+    text: string,
+    search: BrandSearch,
+    { web, canLookUp, waited }: { web: boolean; canLookUp: boolean; waited: number },
+  ): Promise<void> => {
+    if (result.kind === "draft") {
+      return showDraft(result.brief, result.message ?? draftLine(result.brief, { known: result.known, web }), result.count ?? search.count, waited);
+    }
+    const followUp = search.earlier.length > 0 && !web;
+    const next: BrandSearch = {
+      ...search,
+      name: result.name,
+      topics: result.topics.length ? result.topics : search.topics,
+      count: (result.kind === "unknown" ? result.count : undefined) ?? search.count,
+      earlier: web ? search.earlier : [...search.earlier, text].slice(-MAX_EARLIER),
+      options: [],
+    };
+    if (result.kind === "ambiguous") {
+      if (followUp && search.earlier.length >= MAX_EARLIER) return resumeRules(text, next);
+      setBrand({ ...next, options: result.options });
+      await speak([{ kind: "text", text: result.message ?? ambiguousLine(result.name) }], waited);
+      return;
+    }
+    if (followUp) return resumeRules(text, next);
+    if (canLookUp && !search.lookedUp) {
+      await speak([{ kind: "text", mood: "thinking", text: lookingUpLine(result.name) }], waited);
+      setTyping(true);
+      const elapsed = stopwatch();
+      const found = await requestLookup({ reply: text, earlier: search.earlier });
+      const looked = { ...next, lookedUp: true };
+      if (found) return settleBrand(found, text, looked, { web: true, canLookUp: false, waited: elapsed() });
+      setBrand(looked);
+      await speak([{ kind: "text", text: unknownLine(result.name, true) }], elapsed());
+      return;
+    }
+    setBrand(next);
+    await speak([{ kind: "text", text: unknownLine(result.name, next.lookedUp) }], waited);
+  };
+
+  /** Works out which brand the user means and drafts its brief; without a model, falls back to step-by-step questions. */
+  const handleProduct = async (text: string, search: BrandSearch) => {
+    setTyping(true);
+    const elapsed = stopwatch();
+    const { identified, lookup } = await requestIdentify({ reply: text, earlier: search.earlier });
+    if (!identified) {
+      setTyping(false);
+      return resumeRules(text, search);
+    }
+    await settleBrand(identified, text, search, { web: false, canLookUp: lookup, waited: elapsed() });
+  };
+
+  const acceptBrief = async (brief: BriefDraft, count: number | undefined, waited = 0) => {
+    const { state, next } = acceptDraft(draftIntake(brief, count));
+    setIntake(state);
+    setProposed(brief);
+    await speak([{ kind: "text", mood: "happy", text: acceptedLine(state, next) }], waited);
+    if (next === "review") await goReview(toBrief(state), questionCount(state));
+    else setStep(next);
+  };
+
+  const handleConfirm = async (text: string, brief: BriefDraft) => {
+    if (isAgreement(text)) return acceptBrief(brief, intake.count);
+    if (isRejection(text)) return say({ kind: "text", text: BRIEF_COPY.rejected });
+    setTyping(true);
+    const elapsed = stopwatch();
+    const revision = await requestRevision({ reply: text, brief, stage: "confirm" });
+    const waited = elapsed();
+    if (!revision) return speak([{ kind: "text", text: BRIEF_COPY.failed }], waited);
+    if (revision.kind === "accept") return acceptBrief(brief, revision.count ?? intake.count, waited);
+    if (revision.kind !== "change") return speak([{ kind: "text", text: (revision.kind === "unclear" && revision.message) || BRIEF_COPY.unclear }], waited);
+
+    const count = revision.count ?? intake.count;
+    setProposed(revision.brief);
+    setIntake(draftIntake(revision.brief, count));
+    await speak([{ kind: "text", text: revision.message ?? BRIEF_COPY.changed }, { kind: "brief", brief: revision.brief }], waited);
+    if (revision.proceed) await acceptBrief(revision.brief, count);
+  };
+
+  const addQuestion = async (text: string, waited = 0) => {
+    if (planned.length >= MAX_QUESTIONS) {
+      await speak([{ kind: "text", text: `That's the most I can ask in one check (${MAX_QUESTIONS} questions). Remove one to make room.` }], waited);
+      return;
+    }
+    setPlanned((prev) => [...prev, { question: { id: `c${prev.length + 1}-${uid()}`, text, intent: "custom" }, enabled: true }]);
+    await speak([{ kind: "text", text: "Added to the list! Anything else, or shall we start?" }], waited);
+  };
+
+  /** Applies a change made while the plan is up, rewriting the questions only when the change affects them. */
+  const replan = async (brief: BriefDraft, count: number, text: string, waited: number) => {
+    const before = normalizeBrief(draft);
+    const after = normalizeBrief(brief);
+    setProposed(brief);
+    setIntake(acceptDraft(draftIntake(brief, count)).state);
+    await speak([{ kind: "text", text }], waited);
+    if (count !== questionCount(intake) || changesQuestions(before, after)) {
+      return goReview(after, count, planned.filter((p) => p.question.intent === "custom"));
+    }
+    setDraft(after);
+    setMessages((prev) => prev.filter((m) => !isPlanItem(m)));
+    await say({ kind: "plan" }, { kind: "estimate" });
   };
 
   const handleReview = async (text: string) => {
@@ -307,22 +471,36 @@ export function CheckExperience() {
       await startRun({ echo: false });
       return;
     }
-    if (reply.kind !== "ok") {
-      await say({
-        kind: "text",
-        text:
-          reply.kind === "skip"
-            ? "No worries. Press **Ask** on the plan whenever you're ready."
-            : `Try a full question a buyer might ask, like “Which ${draft.category} is easiest to set up?”, or press **Ask** on the plan to start.`,
-      });
+    if (reply.kind === "skip") {
+      await say({ kind: "text", text: "No worries. Press **Ask** on the plan whenever you're ready." });
       return;
     }
-    if (planned.length >= MAX_QUESTIONS) {
-      await say({ kind: "text", text: `That's the most I can ask in one check (${MAX_QUESTIONS} questions). Remove one to make room.` });
-      return;
+    setTyping(true);
+    const elapsed = stopwatch();
+    const brief = proposed ?? draft;
+    const revision = await requestRevision({ reply: text, brief, stage: "plan" });
+    const waited = elapsed();
+    if (!revision) {
+      if (reply.kind === "ok") return addQuestion(reply.value, waited);
+      const example = `Try a full question a buyer might ask, like “Which ${draft.category} is easiest to set up?”, or press **Ask** on the plan to start.`;
+      return speak([{ kind: "text", text: example }], waited);
     }
-    setPlanned((prev) => [...prev, { question: { id: `c${prev.length + 1}-${uid()}`, text: reply.value, intent: "custom" }, enabled: true }]);
-    await say({ kind: "text", text: "Added to the list! Anything else, or shall we start?" });
+    const count = questionCount(intake);
+    switch (revision.kind) {
+      case "question":
+        return addQuestion(revision.text, waited);
+      case "change": {
+        const line = revision.message ?? BRIEF_COPY.planChanged;
+        return replan(revision.brief, revision.count ?? count, revision.proceed ? `${line} ${BRIEF_COPY.planReady}` : line, waited);
+      }
+      case "accept":
+        if (revision.count !== undefined && revision.count !== count) {
+          return replan(brief, revision.count, `Sure, ${revision.count} question${revision.count === 1 ? "" : "s"} it is.`, waited);
+        }
+        return speak([{ kind: "text", text: BRIEF_COPY.planAccepted }], waited);
+      default:
+        return speak([{ kind: "text", text: revision.message ?? BRIEF_COPY.planUnclear }], waited);
+    }
   };
 
   const restart = useCallback(() => {
@@ -332,6 +510,8 @@ export function CheckExperience() {
     setMessages([]);
     setDraft(EMPTY_BRIEF);
     setIntake(emptyIntake());
+    setBrand(NEW_SEARCH);
+    setProposed(null);
     setPlanned([]);
     setModels(ALL_MODELS);
     setWebSearch(true);
@@ -351,11 +531,15 @@ export function CheckExperience() {
       setMessages([{ id: uid(), role: "user", text }]);
       setStep("product");
       setIntake(emptyIntake());
-      await handleIntake("product", text, emptyIntake());
+      setBrand(NEW_SEARCH);
+      setProposed(null);
+      await handleProduct(text, NEW_SEARCH);
       return;
     }
     append({ id: uid(), role: "user", text });
+    if (step === "product") return handleProduct(text, brand);
     if (isIntakeStep(step)) return handleIntake(step, text, intake);
+    if (step === "confirm" && proposed) return handleConfirm(text, proposed);
     if (step === "review") return handleReview(text);
   };
 
@@ -374,6 +558,10 @@ export function CheckExperience() {
   const quickReplies: string[] = (() => {
     if (typing) return [];
     switch (step) {
+      case "product":
+        return brand.options;
+      case "confirm":
+        return ["Looks right"];
       case "category":
         return ["CRM", "project management tool", "AI writing assistant", "accounting software"];
       case "audience":
@@ -405,6 +593,13 @@ export function CheckExperience() {
       return (
         <PipMessage key={message.id} mood={message.mood}>
           <Rich text={message.text} />
+        </PipMessage>
+      );
+    }
+    if (message.kind === "brief") {
+      return (
+        <PipMessage key={message.id} wide>
+          <BriefCard brief={message.brief} />
         </PipMessage>
       );
     }
@@ -585,7 +780,7 @@ export function CheckExperience() {
                 value={input}
                 onChange={setInput}
                 onSubmit={submit}
-                placeholder={PLACEHOLDERS[step]}
+                placeholder={step === "product" && brand.earlier.length ? "Tell Pip in a few words…" : PLACEHOLDERS[step]}
                 disabled={typing || step === "running"}
                 providers={providers}
                 autoFocus

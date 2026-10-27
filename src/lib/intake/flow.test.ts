@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { applyTurn, DEFAULT_QUESTION_COUNT, emptyIntake, nextField, questionCount, questionFor, toBrief } from "@/lib/intake/flow";
+import {
+  acceptDraft,
+  acceptedLine,
+  applyTurn,
+  DEFAULT_QUESTION_COUNT,
+  draftIntake,
+  draftLine,
+  emptyIntake,
+  nextField,
+  questionCount,
+  questionFor,
+  toBrief,
+} from "@/lib/intake/flow";
 import type { IntakeState, OptionalField } from "@/lib/intake/types";
 
 const withState = (patch: Partial<IntakeState>): IntakeState => ({ ...emptyIntake(), ...patch });
@@ -250,5 +262,31 @@ describe("toBrief", () => {
   it("turns intake state into a brief, with skipped fields left empty", () => {
     const state = withState({ product: "Fernly", category: "plant care app", skipped: ["audience", "competitors", "website"] });
     expect(toBrief(state)).toEqual({ product: "Fernly", category: "plant care app", audience: "", competitors: [], website: undefined });
+  });
+});
+
+describe("drafted briefs", () => {
+  const drafted = { product: "BNB Chain", category: "layer 1 blockchain", audience: "", competitors: ["Ethereum"], topics: ["RWA", "AI"] };
+
+  it("fills the intake from the draft, then asks only for the count once it's confirmed", () => {
+    const state = draftIntake(drafted);
+    expect(state).toMatchObject({ product: "BNB Chain", category: "layer 1 blockchain", competitors: ["Ethereum"], topics: ["RWA", "AI"], skipped: [] });
+    const accepted = acceptDraft(state);
+    expect(accepted.next).toBe("count");
+    expect(accepted.state.skipped).toEqual(["audience", "website"]);
+    expect(acceptedLine(accepted.state, accepted.next)).toBe(`Great, that's the brief sorted. ${questionFor("count", accepted.state)}`);
+  });
+
+  it("goes straight to the plan when the user already said how many questions", () => {
+    const accepted = acceptDraft(draftIntake(drafted, 25));
+    expect(accepted.next).toBe("review");
+    expect(acceptedLine(accepted.state, accepted.next)).toBe("Great, that's the brief sorted.");
+    expect(toBrief(accepted.state)).toEqual({ ...drafted, website: undefined });
+  });
+
+  it("introduces the draft by what the brand is, or by what the user said when Pip didn't know it", () => {
+    expect(draftLine({ ...drafted, description: "the Layer 1 blockchain behind BNB" }, { known: true })).toMatch(/^Do you mean \*\*BNB Chain\*\*, the Layer 1 blockchain behind BNB\?/);
+    expect(draftLine(drafted, { known: true, web: true })).toMatch(/^I looked it up\. Is it \*\*BNB Chain\*\*, a layer 1 blockchain\?/);
+    expect(draftLine(drafted, { known: false })).toMatch(/^I don't know \*\*BNB Chain\*\* yet, so I went by what you said\./);
   });
 });

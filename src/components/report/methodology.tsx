@@ -17,7 +17,7 @@ const ITEMS = [
   },
   {
     q: "Where do the questions come from?",
-    a: "You choose how many, up to 100. Small checks use a built-in set. For bigger ones an AI writer (DeepSeek V4 Flash) drafts a mix of buyer questions: best picks, alternatives, comparisons, beginners, budget and specific use cases. Near-duplicates and anything naming your product or site are thrown out, and you can edit the list before it runs.",
+    a: "You choose how many, up to 100. Small checks use a built-in set. For bigger ones an AI writer (Gemini 3.5 Flash Lite) drafts a mix of buyer questions: best picks, alternatives, comparisons, beginners, budget and specific use cases. Near-duplicates and anything naming your product or site are thrown out, and you can edit the list before it runs.",
   },
   {
     q: "How do research topics work?",

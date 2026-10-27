@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyIntake } from "@/lib/intake/flow";
-import { requestIntake, validateIntakeRequest } from "@/lib/intake/request";
+import { requestIdentify, requestIntake, requestLookup, requestRevision, validateBriefRequest, validateIntakeRequest } from "@/lib/intake/request";
 
 describe("validateIntakeRequest", () => {
   it("accepts a reply for a known field and normalises the state", () => {
@@ -117,5 +117,88 @@ describe("requestIntake", () => {
       new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))))) as typeof fetch;
     const result = await requestIntake({ ...input, reply: "Acme" }, { fetchImpl: hang, timeoutMs: 30 });
     expect(result).toMatchObject({ source: "rules", reason: "timeout", turn: { values: { product: "Acme" } } });
+  });
+});
+
+describe("validateBriefRequest", () => {
+  it("accepts identify and lookup requests, keeping the last two earlier replies", () => {
+    expect(validateBriefRequest({ mode: "identify", reply: " Mercury ", earlier: ["a", 5, "b", "c"] })).toEqual({
+      ok: true,
+      value: { mode: "identify", reply: "Mercury", earlier: ["b", "c"] },
+    });
+    expect(validateBriefRequest({ mode: "lookup", reply: "Attio" })).toEqual({ ok: true, value: { mode: "lookup", reply: "Attio", earlier: [] } });
+  });
+
+  it("normalises the brief of a revision and defaults the stage to confirm", () => {
+    const parsed = validateBriefRequest({
+      mode: "revise",
+      reply: "add Base",
+      brief: { product: "BNB Chain", category: "layer 1 blockchain", description: "a chain", competitors: ["Ethereum", 7], topics: ["RWA", "x".repeat(90)], website: "" },
+      stage: "launch",
+    });
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        mode: "revise",
+        reply: "add Base",
+        stage: "confirm",
+        brief: { product: "BNB Chain", category: "layer 1 blockchain", description: "a chain", audience: "", competitors: ["Ethereum"], topics: ["RWA", "x".repeat(40)] },
+      },
+    });
+    expect(validateBriefRequest({ mode: "revise", reply: "x", brief: { product: "A", category: "crm", competitors: [] }, stage: "plan" })).toMatchObject({
+      value: { stage: "plan" },
+    });
+  });
+
+  it.each([
+    ["no body", null],
+    ["an unknown mode", { mode: "guess", reply: "x" }],
+    ["an empty reply", { mode: "identify", reply: "" }],
+    ["a revision without a category", { mode: "revise", reply: "x", brief: { product: "A" } }],
+  ])("rejects %s", (_label, body) => {
+    expect(validateBriefRequest(body).ok).toBe(false);
+  });
+});
+
+describe("brief requests", () => {
+  const respond = (body: unknown, status = 200) =>
+    (async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })) as typeof fetch;
+  const output = {
+    recognized: "yes",
+    name: "Attio",
+    description: "a CRM for modern teams",
+    category: "crm",
+    website: "attio.com",
+    audience: "startups",
+    competitors: ["HubSpot"],
+    topics: [],
+    alternatives: [],
+    count: null,
+    message: "Is it **Attio**?",
+  };
+
+  it("re-reads the model's output in the browser", async () => {
+    const result = await requestIdentify({ reply: "Attio", earlier: [] }, { fetchImpl: respond({ source: "ai", output, lookup: true }) });
+    expect(result).toEqual({
+      identified: {
+        kind: "draft",
+        known: true,
+        brief: { product: "Attio", description: "a CRM for modern teams", category: "crm", website: "attio.com", audience: "startups", competitors: ["HubSpot"] },
+        message: "Is it **Attio**?",
+      },
+      lookup: true,
+    });
+    const lookedUp = await requestLookup({ reply: "Attica", earlier: [] }, { fetchImpl: respond({ source: "ai", output }) });
+    expect(lookedUp).toBeNull();
+  });
+
+  it("returns nothing when the server falls back, fails or is slow, so the intake carries on", async () => {
+    const hang = ((_url: string, init?: RequestInit) =>
+      new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))))) as typeof fetch;
+    for (const fetchImpl of [respond({ source: "rules", reason: "no-model" }), respond({ error: "x" }, 500), hang]) {
+      expect(await requestIdentify({ reply: "Attio", earlier: [] }, { fetchImpl, timeoutMs: 20 })).toEqual({ identified: null, lookup: false });
+    }
+    const brief = { product: "Attio", category: "crm", audience: "", competitors: [] };
+    expect(await requestRevision({ reply: "add Base", brief, stage: "plan" }, { fetchImpl: hang, timeoutMs: 20 })).toBeNull();
   });
 });

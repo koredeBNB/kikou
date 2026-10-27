@@ -1,6 +1,6 @@
 # Kioku: AI search share-of-voice checker
 
-**Are you in the AI's memory?** Kioku (Japanese for "memory") shows whether AI assistants recommend your product. Tell Pip (the bird who runs the checks) your product, category, audience, rivals and, if you like, the topics to research ("research BNB's standing within trading, RWA, AI"). Pick how many questions to ask, from 1 to 100. Pip shows what the check will cost and how long it will take, and once you say go, asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and builds a report:
+**Are you in the AI's memory?** Kioku (Japanese for "memory") shows whether AI assistants recommend your product. Tell Pip (the bird who runs the checks) which brand to check and, if you like, what to focus on ("BNB Chain, more specifically RWA, trading and AI"). Pip drafts the brief (what the brand is, its category, audience, website, rivals and focus areas) for you to confirm or correct in plain words. Pick how many questions to ask, from 1 to 100. Pip shows what the check will cost and how long it will take, and once you say go, asks ChatGPT, Claude, Gemini and Perplexity the questions your buyers ask, streams each answer into the chat as it lands, and builds a report:
 
 - **Share of voice**, overall and for each assistant
 - **By topic**: share of voice, rank, rivals, cited sources and next steps for each research topic
@@ -53,29 +53,39 @@ Through OpenRouter, ChatGPT, Claude and Gemini search the web by default, like t
 
 Keys stay on the server. The browser only learns whether each assistant is live, and which model it uses.
 
-## How Pip reads your replies
+## How Pip drafts your brief
 
-With a key, each intake reply goes to a small, fast model through `POST /api/intake`. The model gets Pip's question, the answers so far and the reply, and returns structured JSON: whether you answered, skipped or were unclear, the cleaned values, and Pip's next message. One reply can fill several steps ("It's Fernly, a plant care app for new plant parents, site's fernly.app"), and Pip skips the steps already answered.
+With a key, Pip starts by working out which brand you mean (`POST /api/intake/brief`). A small, fast model drafts the whole brief from what it already knows: what the brand is, its category, audience, website, up to five rivals, and the focus areas you named, phrased so they make sense for that brand. Pip asks "Do you mean **BNB Chain**, the Layer 1 blockchain behind the BNB token?" and shows the brief as a card. This takes about a second and a half.
 
-The model only reads and phrases. It never touches the questions or the scoring:
+- A name that could mean several things ("Mercury") gets a "which one?", with the options as quick replies.
+- A brand the model doesn't know, where you said what it is ("Fernly, a plant care app for new plant parents"), is drafted from your words, with well-known rivals of that kind.
+- A bare name the model doesn't know is looked up on the web through OpenRouter's web plugin (Exa, three results, about a cent). The lookup only counts if the results describe exactly the name you wrote, since a similar name is a different company. If it finds nothing, Pip asks what the brand is in a few words and drafts from that.
 
-- The output is checked against a schema, and values are cleaned with the same rules as the built-in parser. Product, competitor and website values must appear in your reply, so the model can't invent them.
-- The flow is fixed. Pip only uses the model's message when it asks for the step the app picks next. Messages with links or markup are dropped.
-- Replies are capped at 500 characters and passed as quoted data, with instructions to ignore any requests inside them.
+Then confirm or correct the brief in plain words: "looks right", "drop Polygon, add Base", "it's mainly for institutions", "no, I meant the token". The model reads each correction and Pip shows the updated brief. "Yes, 25 questions" or "add Base and go" confirms in one go. Once it's confirmed, Pip asks how many questions to ask (unless you already said) and writes the plan.
 
-With no key, after a 6 second timeout (`SOV_INTAKE_TIMEOUT_MS`, up to 8000), on an error, or when the output doesn't validate, Pip falls back to the rule-based parser in `src/lib/sov/intake.ts`, so demo mode works the same.
+You can still change the brief while the plan is up: type the change ("just RWA and AI", "add Sui as a rival"). Pip rewrites the questions when the category, audience, focus areas or count change, keeping any questions you added yourself, and keeps them when only the rivals, website or name change. A buyer question you type is added to the plan, as before.
 
-| Setting                   | Default                                                         |
-| ------------------------- | --------------------------------------------------------------- |
-| Model, first key found    | OpenRouter `deepseek/deepseek-v4-flash`, then OpenAI `gpt-4.1-nano`, Anthropic `claude-haiku-4-5`, Gemini `gemini-2.5-flash-lite` |
-| Overrides                 | `OPENROUTER_INTAKE_MODEL`, `OPENAI_INTAKE_MODEL`, `ANTHROPIC_INTAKE_MODEL`, `GEMINI_INTAKE_MODEL` |
-| `SOV_INTAKE_RULES=true`   | Always use the rule-based parser, even with keys               |
+The model only drafts and reads. It never touches the scoring:
 
-Through OpenRouter, the intake asks for strict structured output from hosts that support it (`require_parameters`) and turns reasoning off (`reasoning.effort: "none"`). DeepSeek V4 Flash reasons by default, and the reasoning would use up the whole output budget before any JSON appears. If you override the model with one that has no reasoning switch, OpenRouter finds no host for that setting, so the request is retried once without it.
+- Every output is checked against a schema and cleaned with the built-in parser's rules. For a brand the model doesn't know, the name, website and focus areas must appear in your own words, so it can't invent them; for one it knows, you see and confirm everything it drafted.
+- Messages with links or markup are dropped, and Pip uses its own wording when the model's doesn't fit.
+- Your messages are passed as quoted data, capped at 500 characters, with instructions to ignore any requests inside them.
+
+With no key, after a timeout (`SOV_INTAKE_TIMEOUT_MS`, 6 seconds by default and at most 8), on an error, or when the output doesn't validate, Pip asks step by step instead: category, audience, rivals, website, focus areas and count. Each reply goes through `POST /api/intake`, which reads it with the model when there is one, or with the rule-based parser in `src/lib/sov/intake.ts`, so demo mode works the same. One reply can fill several steps ("It's Fernly, a plant care app for new plant parents, site's fernly.app").
+
+| Setting                        | Default                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| Model, first key found         | OpenRouter `google/gemini-3.5-flash-lite` (falling back to `google/gemini-3.1-flash-lite` when it's busy), then OpenAI `gpt-4.1-nano`, Anthropic `claude-haiku-4-5`, Gemini `gemini-2.5-flash-lite` |
+| Overrides                      | `OPENROUTER_INTAKE_MODEL`, `OPENAI_INTAKE_MODEL`, `ANTHROPIC_INTAKE_MODEL`, `GEMINI_INTAKE_MODEL` |
+| `OPENROUTER_INTAKE_REASONING`  | Reasoning effort: `none`, `minimal`, `low`, `medium` or `high`. `low` for the default model, `none` for one set with `OPENROUTER_INTAKE_MODEL` |
+| `SOV_INTAKE_WEB_LOOKUP=false`  | Never look brands up on the web (on by default with an OpenRouter key) |
+| `SOV_INTAKE_RULES=true`        | Always ask step by step with the rule-based parser, even with keys |
+
+The same model writes the buyer questions. Through OpenRouter, every intake call asks for strict structured output from hosts that support it (`require_parameters`). Gemini 3.5 Flash Lite can't switch reasoning off, but at `low` it answers in a second or two without spending reasoning tokens, for well under a tenth of a cent per reply. A model you pick with `OPENROUTER_INTAKE_MODEL` starts with reasoning off: one that has no reasoning switch is retried once without it, and one that always reasons is retried at `low`.
 
 ## Questions, topics and the estimate
 
-After the website, Pip asks what to focus on (skip for a broad check) and how many questions to ask each assistant: 10, 25, 50, 100 or any number up to 100. Casual answers like "about 50" or "max" work.
+Focus areas come from your first message or a correction ("focus on RWA and AI"); with none, the check is broad. Pip asks how many questions to ask each assistant: 10, 25, 50, 100 or any number up to 100. Casual answers like "about 50" or "max" work.
 
 Broad checks of up to 6 questions use the built-in set. Anything bigger goes to `POST /api/questions`, where the intake model writes the rest in parallel batches of up to 25, each with a different angle: best picks, alternatives, comparisons, beginners, budget and use cases. Every question is cleaned, near-duplicates are dropped, and any question naming your product, its site or a squashed spelling of it ("TrustWallet") is thrown out. With topics, the count is split evenly across them and each topic is written separately. If the writer is slow (`SOV_QUESTIONS_TIMEOUT_MS`, 40 seconds by default), fails or comes back short, templates fill the gap and Pip says if there are fewer distinct questions than you asked for. Every question stays editable on the plan card.
 
@@ -101,7 +111,9 @@ Set `SOV_BASIC_AUTH_USER` and `SOV_BASIC_AUTH_PASSWORD` to put the whole app beh
 
 Spending is capped per UTC day across everyone using the app: $20 by default, or `SOV_MAX_SPEND_PER_DAY` in dollars (`off` removes the cap). Each check holds its estimated cost when it starts, and every answer books what OpenRouter actually charged (`usage.cost`) and draws the hold down by the same amount. A check whose estimate is more than what's left, counting the holds of checks still running, gets a 429, and Pip says how much is left and when it resets. Demo answers are free and never blocked.
 
-Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour) and intake replies (150 an hour) have their own limits; over those, Pip quietly falls back to templates and the built-in parser. `SOV_CHECKS_PER_HOUR=off` removes all three limits.
+Web lookups while drafting a brief book what they cost to the same daily budget, and stop once less than $0.05 of it is left. Like checks, they need Redis on Vercel.
+
+Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour), intake replies (150 an hour) and web lookups (20 an hour) have their own limits; over those, Pip quietly falls back to templates, the built-in parser or asking what the brand is. `SOV_CHECKS_PER_HOUR=off` removes all four limits.
 
 ## Deploy to Vercel
 
@@ -144,7 +156,8 @@ src/
     api/check/route.ts       Starts a check: validates, rate-limits, holds the budget, saves the run
     api/check/[id]/batch/    Answers up to 5 questions of a check and streams them as NDJSON
     api/check/[id]/finish/   Releases a check's budget hold
-    api/intake/route.ts      Reads one intake reply with the intake model or the rules
+    api/intake/brief/        Drafts the brief: identifies the brand, looks it up on the web, reads corrections
+    api/intake/route.ts      Reads one step-by-step intake reply with the intake model or the rules
     api/questions/route.ts   Writes the buyer questions for a check (AI writer, then templates)
     api/providers/route.ts   Which assistants are live or demo, and today's budget
   components/
@@ -156,7 +169,7 @@ src/
   lib/
     sov/                     Scoring, question generation, mock answers, answering and batching, budget, rate limits
     store/                   Run state, spend ledger and counters: Upstash Redis, or in-process for local use
-    intake/                  AI intake: prompt, output schema, model clients, merging into intake state
+    intake/                  AI intake: brief drafting and corrections, prompts, output schemas, model clients, intake state
     providers/               Provider config and live API adapters, direct or via OpenRouter (plain fetch)
 ```
 

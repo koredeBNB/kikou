@@ -107,6 +107,13 @@ end
 return tonumber(redis.call('GET', KEYS[1]) or '0')
 `;
 
+/** KEYS: spend. ARGV: cost, day ttl. */
+const CHARGE = `
+redis.call('INCRBY', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return 1
+`;
+
 /** KEYS: counter. ARGV: window ms. Returns {count, ms until reset}. */
 const HIT = `
 local count = redis.call('INCR', KEYS[1])
@@ -126,6 +133,7 @@ export function createRedisStore(redis: Redis): CheckStore {
   const claim = redis.createScript<[string, string]>(CLAIM);
   const complete = redis.createScript<number>(COMPLETE);
   const release = redis.createScript<number>(RELEASE);
+  const charge = redis.createScript<number>(CHARGE);
   const hit = redis.createScript<[number, number]>(HIT);
 
   return {
@@ -169,6 +177,11 @@ export function createRedisStore(redis: Redis): CheckStore {
     async release(runId, days) {
       const keys = [costKey(runId), ...[...new Set(days)].flatMap((day) => [holdsKey(day), leasesKey(day)])];
       return { costUsd: fromMicros(Number(await release.exec(keys, [runId]))) };
+    },
+
+    async charge(day, costUsd) {
+      const micros = toMicros(costUsd);
+      if (micros > 0) await charge.exec([spendKey(day)], [s(micros), s(DAY_TTL_SECONDS)]);
     },
 
     async hit(key, windowMs) {

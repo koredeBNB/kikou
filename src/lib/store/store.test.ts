@@ -99,6 +99,17 @@ describe.each(stores)("%s store", (_name, make) => {
     expect(await store.hold({ day, runId: id, estimateUsd: 0.4, totalTasks: 4, limitUsd: 1, now: later })).toEqual({ ok: true, spentUsd: 0.1, heldUsd: 0.3 });
   });
 
+  it("books spending outside a check to the day, so new holds count it", async () => {
+    const store = make();
+    const day = unique();
+    const now = Date.now();
+    await store.charge(day, 0.0075, now);
+    await store.charge(day, 0, now);
+    await store.charge(day, 0.0025, now);
+    expect(await store.ledger(day, now)).toEqual({ spentUsd: 0.01, heldUsd: 0 });
+    expect(await store.hold({ day, runId: unique(), estimateUsd: 0.995, totalTasks: 1, limitUsd: 1, now })).toEqual({ ok: false, spentUsd: 0.01, heldUsd: 0 });
+  });
+
   it("counts requests in a window that starts with the first one", async () => {
     const store = make();
     const key = unique();

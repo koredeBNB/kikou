@@ -364,6 +364,22 @@ export function takeTopics(input: string): { text: string; topics?: string[] } {
 const START =
   /^(?:let'?s\s+(?:go|start|do\s+(?:it|this))|go(?:\s+ahead)?|start(?:\s+(?:it|now|the\s+check))?|run(?:\s+(?:it|the\s+check))?|yes|yep|yeah|yup|sure|ok(?:ay)?|looks?\s+good|sounds?\s+good|perfect|great|ready|do\s+it|ask(?:\s+them)?|that'?s\s+(?:all|it|everything)|all\s+good|good\s+to\s+go)$/;
 
+const AGREE_PHRASE = String.raw`(?:yes(?:\s+please)?|yep|yeah|yup|yea|ya|sure|ok(?:ay)?|correct|exactly|right|perfect|great|good|nice|lovely|brilliant|cool|spot\s+on|bang\s+on|nailed\s+it|(?:that'?s|thats|it'?s|its)\s+(?:it|right|correct|perfect|great|fine|the\s+one)|(?:(?:it|that|this|all)\s+)?(?:looks?|sounds?|seems?)\s+(?:right|good|great|perfect|correct|fine)|all\s+(?:good|correct|right)|that\s+one|go\s+(?:ahead|on)|carry\s+on|continue|confirm(?:ed)?|thanks|thank\s+you|cheers|ta)`;
+const AGREE = new RegExp(String.raw`^${AGREE_PHRASE}(?:\s+(?:and\s+)?${AGREE_PHRASE})*$`);
+const REJECT = /^(?:no|nope|nah|not\s+quite|not\s+really|wrong|incorrect|(?:that'?s|thats|it'?s|its)\s+(?:wrong|not\s+(?:it|right|correct|the\s+one))|not\s+(?:it|right|that\s+one|the\s+one))(?:\s+(?:sorry|thanks))?$/;
+
+const plainReply = (input: string) => normalise(input).replace(/[?/]/g, " ").replace(/\s+/g, " ").trim();
+
+/** A plain yes to the brief Pip drafted: "yes", "looks right", "yep, perfect thanks". */
+export function isAgreement(input: string): boolean {
+  return AGREE.test(plainReply(input));
+}
+
+/** A bare no, with nothing said about what to change. */
+export function isRejection(input: string): boolean {
+  return REJECT.test(plainReply(input));
+}
+
 /** A reply on the question plan: start the check, or add the user's own buyer question. */
 export function readPlanReply(input: string): { kind: "start" } | Reply<string> {
   const text = input.trim();

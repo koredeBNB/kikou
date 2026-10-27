@@ -9,6 +9,7 @@ import {
   type OptionalField,
   type PipLine,
 } from "@/lib/intake/types";
+import type { BriefDraft } from "@/lib/intake/brief";
 import { listJoin } from "@/lib/format";
 import { MAX_QUESTION_COUNT } from "@/lib/sov/intake";
 import type { Brief } from "@/lib/sov/types";
@@ -40,6 +41,27 @@ export function nextField(state: IntakeState): IntakeNext {
 
 /** Questions per assistant: the user's number, or the default when they skipped it. */
 export const questionCount = (state: IntakeState) => state.count ?? DEFAULT_QUESTION_COUNT;
+
+/** The intake state for a brief Pip drafted, before the user has confirmed it. */
+export function draftIntake(brief: Brief, count?: number): IntakeState {
+  return {
+    ...emptyIntake(),
+    product: brief.product,
+    category: brief.category,
+    audience: brief.audience,
+    competitors: [...brief.competitors],
+    website: brief.website,
+    topics: [...(brief.topics ?? [])],
+    count,
+  };
+}
+
+/** Once the user confirms the draft, its empty fields stay empty: only the question count may still be asked. */
+export function acceptDraft(state: IntakeState): { state: IntakeState; next: IntakeNext } {
+  const skipped = OPTIONAL_FIELDS.filter((field) => field !== "count" && !filled(state, field));
+  const next: IntakeState = { ...state, skipped: [...new Set([...state.skipped, ...skipped])] };
+  return { state: next, next: nextField(next) };
+}
 
 export function toBrief(state: IntakeState): Brief {
   return {
@@ -96,6 +118,39 @@ export function questionFor(field: IntakeField, state: IntakeState): string {
     case "count":
       return `Last one: how many questions should I ask each AI? Pick 10, 25, 50 or 100, or any number up to ${MAX_QUESTION_COUNT}.`;
   }
+}
+
+const CHECK_BRIEF = "Here's the brief I'd use. Tell me anything to change, or say it looks right.";
+const WHAT_IS_IT = "What is it, in a few words? Something like “plant care app” or “CRM for small agencies” works.";
+
+/** Pip's lines for a drafted brief, used when the model's own message can't be. */
+export function draftLine(brief: BriefDraft, { known, web = false }: { known: boolean; web?: boolean }): string {
+  if (!known) return `I don't know **${brief.product}** yet, so I went by what you said. ${CHECK_BRIEF}`;
+  const what = brief.description ?? withArticle(brief.category);
+  return `${web ? "I looked it up. Is it" : "Do you mean"} **${brief.product}**, ${what}? ${CHECK_BRIEF}`;
+}
+
+export const ambiguousLine = (name: string) => `**${name}** could be a few different things. Which one do you mean? Pick one below or say it in a few words.`;
+export const lookingUpLine = (name: string) => `I don't know **${name}** yet, so let me look it up…`;
+export const unknownLine = (name: string, lookedUp: boolean) =>
+  lookedUp ? `I couldn't find **${name}** online, so I'll need your help. ${WHAT_IS_IT}` : `I don't know **${name}** yet. ${WHAT_IS_IT}`;
+
+export const BRIEF_COPY = {
+  rejected: "No problem. What should I change? You can fix anything, like “I meant the token” or “drop Solana, add Base”.",
+  unclear: "Sorry, I didn't catch what to change. Try something like “add Base” or “focus on RWA and AI”, or say it looks right.",
+  changed: "Done. Here's the updated brief. Anything else to change?",
+  failed: "Sorry, I couldn't update the brief just now. Try again, or say it looks right to carry on.",
+  accepted: "Great, that's the brief sorted.",
+  planUnclear:
+    "I can add a buyer question or change the brief. Try “Which wallet has the lowest fees?” or “add Base as a rival”, or press **Ask** on the plan to start.",
+  planAccepted: "Lovely. Press **Ask** on the plan whenever you're ready, or say “go”.",
+  planReady: "Press **Ask** on the plan below when you're ready.",
+  planChanged: "Done, the plan's updated.",
+};
+
+/** What Pip says once the brief is confirmed, ending with the next question if there is one. */
+export function acceptedLine(state: IntakeState, next: IntakeNext): string {
+  return next === "review" ? BRIEF_COPY.accepted : `${BRIEF_COPY.accepted} ${questionFor(next, state)}`;
 }
 
 const SKIP_REQUIRED: Record<"product" | "category", string> = {

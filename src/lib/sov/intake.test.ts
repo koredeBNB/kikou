@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  isAgreement,
   isNonAnswer,
+  isRejection,
   parseCompetitors,
   parseIntro,
   readAudience,
@@ -328,5 +330,24 @@ describe("readPlanReply", () => {
   it("skips non-answers and calls fragments unclear", () => {
     expect(readPlanReply("not sure")).toEqual({ kind: "skip" });
     expect(readPlanReply("gmail")).toEqual({ kind: "unclear" });
+  });
+});
+
+describe("isAgreement", () => {
+  it.each(["yes", "Yep, perfect thanks!", "looks right", "That's it", "yes that's the one", "all good", "looks good", "spot on", "OK"])(
+    "reads %j as a yes",
+    (reply) => expect(isAgreement(reply)).toBe(true),
+  );
+
+  it.each(["yes but add Base", "no", "yes, 25 questions", "drop Solana", "looks right except the audience", ""])("doesn't read %j as a plain yes", (reply) => {
+    expect(isAgreement(reply)).toBe(false);
+  });
+});
+
+describe("isRejection", () => {
+  it.each(["no", "Nope.", "not quite", "that's wrong", "not the one, sorry"])("reads %j as a bare no", (reply) => expect(isRejection(reply)).toBe(true));
+
+  it.each(["no, I meant the token", "not RWA", "yes", "nope, it's for institutions"])("leaves %j for the model to read", (reply) => {
+    expect(isRejection(reply)).toBe(false);
   });
 });

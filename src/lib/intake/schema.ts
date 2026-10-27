@@ -50,7 +50,7 @@ export const INTAKE_JSON_SCHEMA = {
 type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value);
 
-function decode(raw: unknown): unknown {
+export function decode(raw: unknown): unknown {
   if (typeof raw !== "string") return raw;
   const text = raw
     .trim()
@@ -64,10 +64,10 @@ function decode(raw: unknown): unknown {
 }
 
 const squash = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-const tidy = (value: string) => value.replace(/\s+/g, " ").trim().replace(/[.!?,;:]+$/, "").trim().slice(0, MAX_VALUE);
+export const tidy = (value: string) => value.replace(/\s+/g, " ").trim().replace(/[.!?,;:]+$/, "").trim().slice(0, MAX_VALUE);
 
 /** Brand names and domains must come from the reply itself, so the model can't invent them. */
-function inReply(value: string, reply: string): boolean {
+export function inReply(value: string, reply: string): boolean {
   const needle = squash(value);
   return needle.length > 0 && ` ${squash(reply)} `.includes(` ${needle} `);
 }
@@ -85,7 +85,7 @@ function cleanSkips(skips: unknown[], values: IntakeValues, reply: string): Opti
   return OPTIONAL_FIELDS.filter((field) => skips.includes(field) && values[field] === undefined && MENTIONS[field].test(reply));
 }
 
-function cleanMessage(value: string): string | undefined {
+export function cleanMessage(value: string): string | undefined {
   const text = value.replace(/\s+/g, " ").trim();
   if (!text || text.length > MAX_MESSAGE) return undefined;
   if (/https?:|www\.|[<>`]|\]\(/i.test(text)) return undefined;

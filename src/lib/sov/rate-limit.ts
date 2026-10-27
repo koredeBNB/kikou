@@ -1,12 +1,12 @@
 import type { Env } from "@/lib/providers/config";
 import type { CheckStore } from "@/lib/store/types";
 
-export type RateBucket = "check" | "questions" | "intake";
+export type RateBucket = "check" | "questions" | "intake" | "lookup";
 
 const HOUR_MS = 3_600_000;
 export const DEFAULT_CHECKS_PER_HOUR = 12;
-/** Question plans and intake replies call a model too, so they get roomy limits of their own. */
-const FIXED: Record<Exclude<RateBucket, "check">, number> = { questions: 30, intake: 150 };
+/** Question plans, intake replies and web lookups call a model too, so they get limits of their own. */
+const FIXED: Record<Exclude<RateBucket, "check">, number> = { questions: 30, intake: 150, lookup: 20 };
 const OFF = /^(?:off|none|unlimited|no)$/i;
 
 export interface RateRefusal {
