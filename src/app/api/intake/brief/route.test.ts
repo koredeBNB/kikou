@@ -18,7 +18,7 @@ const brand = {
   name: "Attio",
   description: "a CRM for modern teams",
   category: "crm",
-  website: "attio.com",
+  websites: ["attio.com"],
   audience: "startups",
   competitors: ["HubSpot", "Salesforce"],
   topics: [],
@@ -106,7 +106,7 @@ describe("POST /api/intake/brief", () => {
     const change = {
       intent: "change",
       proceed: false,
-      brief: { ...brief, description: null, audience: null, website: null, competitors: ["HubSpot", "Pipedrive"], topics: [] },
+      brief: { ...brief, description: null, audience: null, websites: [], competitors: ["HubSpot", "Pipedrive"], topics: [] },
       question: null,
       count: null,
       message: "Done: I added Pipedrive.",

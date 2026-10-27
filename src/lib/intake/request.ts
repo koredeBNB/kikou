@@ -13,6 +13,7 @@ import type { IntakeInput } from "@/lib/intake/prompt";
 import { rulesTurn } from "@/lib/intake/rules";
 import { parseIntakeTurn } from "@/lib/intake/schema";
 import { INTAKE_FIELDS, type FallbackReason, type IntakeField, type IntakeResult, type IntakeState } from "@/lib/intake/types";
+import { otherSitesOf } from "@/lib/sov/citations";
 import { MAX_QUESTION_COUNT, MAX_TOPICS } from "@/lib/sov/intake";
 
 const MAX_REPLY = 1000;
@@ -26,7 +27,6 @@ export const CLIENT_TIMEOUT_MS = 9000;
 const str = (value: unknown, max = MAX_VALUE) => (typeof value === "string" ? value.trim().slice(0, max) : "");
 const isField = (value: unknown): value is IntakeField => INTAKE_FIELDS.includes(value as IntakeField);
 const fields = (value: unknown): IntakeField[] => (Array.isArray(value) ? [...new Set(value.filter(isField))] : []);
-
 export function validateIntakeRequest(input: unknown): { ok: true; value: IntakeInput } | { ok: false; error: string } {
   if (!input || typeof input !== "object") return { ok: false, error: "Expected a JSON body." };
   const body = input as Record<string, unknown>;
@@ -36,12 +36,15 @@ export function validateIntakeRequest(input: unknown): { ok: true; value: Intake
 
   const raw = (body.state && typeof body.state === "object" ? body.state : {}) as Record<string, unknown>;
   const count = raw.count;
+  const website = str(raw.website) || undefined;
+  const otherSites = otherSitesOf(website, raw.otherSites);
   const state: IntakeState = {
     product: str(raw.product),
     category: str(raw.category),
     audience: str(raw.audience),
     competitors: Array.isArray(raw.competitors) ? raw.competitors.map((c) => str(c)).filter(Boolean).slice(0, MAX_COMPETITORS) : [],
-    website: str(raw.website) || undefined,
+    website,
+    ...(otherSites.length ? { otherSites } : {}),
     topics: Array.isArray(raw.topics) ? raw.topics.map((t) => str(t, MAX_TOPIC)).filter(Boolean).slice(0, MAX_TOPICS) : [],
     count: Number.isInteger(count) && (count as number) >= 1 && (count as number) <= MAX_QUESTION_COUNT ? (count as number) : undefined,
     skipped: fields(raw.skipped),
@@ -87,7 +90,7 @@ export type BriefRequest =
   | ({ mode: "revise" } & ReviseInput);
 
 const MODES = ["identify", "lookup", "revise"] as const;
-const STAGES: BriefStage[] = ["confirm", "plan"];
+const STAGES: BriefStage[] = ["confirm", "sites", "plan"];
 
 function briefOf(value: unknown): BriefDraft | null {
   if (!value || typeof value !== "object") return null;
@@ -105,6 +108,8 @@ function briefOf(value: unknown): BriefDraft | null {
   if (description) draft.description = description;
   const website = str(raw.website);
   if (website) draft.website = website;
+  const otherSites = otherSitesOf(website, raw.otherSites);
+  if (otherSites.length) draft.otherSites = otherSites;
   const topics = Array.isArray(raw.topics) ? raw.topics.map((t) => str(t, MAX_TOPIC)).filter(Boolean).slice(0, MAX_TOPICS) : [];
   if (topics.length) draft.topics = topics;
   return draft;

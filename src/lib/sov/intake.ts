@@ -1,4 +1,4 @@
-import { siteDomain } from "@/lib/sov/citations";
+import { cleanSites, coveredBy, siteDomain } from "@/lib/sov/citations";
 import type { Brief } from "@/lib/sov/types";
 
 export type IntroFields = Partial<Pick<Brief, "product" | "category" | "audience" | "website">>;
@@ -7,7 +7,7 @@ export type IntroFields = Partial<Pick<Brief, "product" | "category" | "audience
 export type Reply<T> = { kind: "ok"; value: T } | { kind: "skip" } | { kind: "unclear" };
 
 const DOMAIN = /^(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+)\.[a-z]{2,}(?:\.[a-z]{2,})?\/?$/i;
-const DOMAIN_IN_TEXT = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/\S*)?/i;
+const DOMAINS_IN_TEXT = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/[^\s,;]*)?/gi;
 const SEPARATOR = /^(.+?)(?:\s*,\s*|\s+[-–—]\s+|\s+is\s+|\s*:\s*)(.+)$/i;
 
 function titleCase(slug: string): string {
@@ -245,13 +245,25 @@ export function readAudience(input: string): Reply<string> {
 
 const WEBSITE_SKIP = [/\b(?:coming\s+soon|under\s+construction|not\s+live|not\s+launched|launching\s+soon|in\s+progress)\b/, /^(?:no|none|not)\b.*\b(?:site|website|domain|url|page)\b/];
 
-export function readWebsite(input: string): Reply<string> {
+/** Every domain in the reply, in order, so "fernly.app, and fernly.dev for the docs" gives both. */
+export function readWebsites(input: string): Reply<string[]> {
   const text = input.trim();
-  const token = text.match(DOMAIN_IN_TEXT)?.[0];
-  const domain = token ? siteDomain(token) : null;
-  if (domain) return { kind: "ok", value: domain };
+  const sites = cleanSites([...text.matchAll(DOMAINS_IN_TEXT)].map((match) => match[0]));
+  if (sites.length) return { kind: "ok", value: sites };
   if (isNonAnswer(text) || WEBSITE_SKIP.some((pattern) => pattern.test(normalise(text)))) return { kind: "skip" };
   return { kind: "unclear" };
+}
+
+const RULED_OUT = /\b(?:not|drop|remove|without|minus|except)\s+(?:the\s+)?$/i;
+
+/** The domains a reply adds and the ones it rules out, as in "also bnb.org" or "drop bnb.org" or "bnb.org, not bnbchain.org". */
+export function readSiteChanges(input: string): { add: string[]; remove: string[] } {
+  const add: string[] = [];
+  const remove: string[] = [];
+  for (const match of input.matchAll(DOMAINS_IN_TEXT)) {
+    (RULED_OUT.test(input.slice(0, match.index)) ? remove : add).push(match[0]);
+  }
+  return { add: cleanSites(add), remove: cleanSites(remove) };
 }
 
 export const MAX_QUESTION_COUNT = 100;
@@ -378,6 +390,31 @@ export function isAgreement(input: string): boolean {
 /** A bare no, with nothing said about what to change. */
 export function isRejection(input: string): boolean {
   return REJECT.test(plainReply(input));
+}
+
+/** "keep": the current sites are right and complete. "none": there's no site. "set": the sites after the reply. */
+export type SitesReply = { kind: "keep" } | { kind: "none" } | { kind: "set"; sites: string[] } | { kind: "unclear" };
+
+const NO_MORE =
+  /^(?:(?:yes|yep|yeah|yup|ok(?:ay)?|no|nope|nah)\s+)?(?:that'?s\s+(?:all|it|everything|the\s+lot)|no\s+(?:others?|more)(?:\s+(?:sites?|domains?))?|nothing\s+else|(?:just|only)\s+(?:that|those|that\s+one|the\s+one|one)|thanks|thank\s+you)(?:\s+(?:thanks|thank\s+you|cheers))?$/;
+const STARTS_NO = /^(?:no|nope|nah|wrong|actually)\b/;
+const ALSO = /\b(?:also|too|as\s+well|plus|another|add)\b/;
+
+/**
+ * The rules' reading of a reply about the brand's own sites, for when the model can't help. Domains are
+ * added to the current ones unless the reply starts with a no ("no, it's bnb.org"), and ruled-out ones dropped.
+ */
+export function readSitesReply(reply: string, current: string[]): SitesReply {
+  const text = plainReply(reply);
+  const { add, remove } = readSiteChanges(reply);
+  if (add.length || remove.length) {
+    const replace = add.length > 0 && STARTS_NO.test(text) && !ALSO.test(text);
+    const kept = replace ? [] : current.filter((site) => !coveredBy(site, remove));
+    return { kind: "set", sites: cleanSites([...kept, ...add]) };
+  }
+  const done = NO_MORE.test(text) || isNonAnswer(reply);
+  if (current.length) return done || isAgreement(reply) ? { kind: "keep" } : { kind: "unclear" };
+  return done || WEBSITE_SKIP.some((pattern) => pattern.test(normalise(reply))) ? { kind: "none" } : { kind: "unclear" };
 }
 
 /** A reply on the question plan: start the check, or add the user's own buyer question. */

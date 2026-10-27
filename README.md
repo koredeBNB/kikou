@@ -55,19 +55,21 @@ Keys stay on the server. The browser only learns whether each assistant is live,
 
 ## How Pip drafts your brief
 
-With a key, Pip starts by working out which brand you mean (`POST /api/intake/brief`). A small, fast model drafts the whole brief from what it already knows: what the brand is, its category, audience, website, up to five rivals, and the focus areas you named, phrased so they make sense for that brand. Pip asks "Do you mean **BNB Chain**, the Layer 1 blockchain behind the BNB token?" and shows the brief as a card. This takes about a second and a half.
+With a key, Pip starts by working out which brand you mean (`POST /api/intake/brief`). A small, fast model drafts the whole brief from what it already knows: what the brand is, its category, audience, websites (up to three it's sure of), up to five rivals, and the focus areas you named, phrased so they make sense for that brand. Pip asks "Do you mean **BNB Chain**, the Layer 1 blockchain behind the BNB token?" and shows the brief as a card. This takes about a second and a half.
 
 - A name that could mean several things ("Mercury") gets a "which one?", with the options as quick replies.
 - A brand the model doesn't know, where you said what it is ("Fernly, a plant care app for new plant parents"), is drafted from your words, with well-known rivals of that kind.
 - A bare name the model doesn't know is looked up on the web through OpenRouter's web plugin (Exa, three results, about a cent). The lookup only counts if the results describe exactly the name you wrote, since a similar name is a different company. If it finds nothing, Pip asks what the brand is in a few words and drafts from that.
 
-Then confirm or correct the brief in plain words: "looks right", "drop Polygon, add Base", "it's mainly for institutions", "no, I meant the token". The model reads each correction and Pip shows the updated brief. "Yes, 25 questions" or "add Base and go" confirms in one go. Once it's confirmed, Pip asks for your website if the brief doesn't have one yet (citations of your own site are counted against it, so it's worth adding, though you can skip it), then how many questions to ask (unless you already said), and writes the plan. The card marks the website as the one your citations are counted against, so check it before you confirm.
+Then confirm or correct the brief in plain words: "looks right", "drop Polygon, add Base", "it's mainly for institutions", "no, I meant the token". The model reads each correction and Pip shows the updated brief. "Yes, 25 questions" or "add Base and go" confirms in one go. Once it's confirmed, Pip always asks about your websites, even when it drafted them, since citations of your own sites are what the report counts as yours. With sites on the card it says "I'll count citations of **bnbchain.org** as yours, subdomains included. Got any other sites?", and you can say "that's all", add one ("also bnb.org"), swap it ("no, it's bnb.org") or drop one. With none, it asks for your website, and you can list several or skip. Then it asks how many questions to ask (unless you already said) and writes the plan. Replies like "that's all", "also bnb.org" or "skip" are read by the rules straight away; anything else goes to the model, with the rules as the fallback.
 
-You can still change the brief while the plan is up: type the change ("just RWA and AI", "add Sui as a rival"). Pip rewrites the questions when the category, audience, focus areas or count change, keeping any questions you added yourself, and keeps them when only the rivals, website or name change. A buyer question you type is added to the plan, as before.
+A brand can have up to five sites: the main one first, then any others, such as a separate docs or blog domain. A citation counts as yours when its domain is one of them or a subdomain of one.
+
+You can still change the brief while the plan is up: type the change ("just RWA and AI", "add Sui as a rival", "also count bnb.org as ours"). Pip rewrites the questions when the category, audience, focus areas or count change, keeping any questions you added yourself, and keeps them when only the rivals, websites or name change. A buyer question you type is added to the plan, as before.
 
 The model only drafts and reads. It never touches the scoring:
 
-- Every output is checked against a schema and cleaned with the built-in parser's rules. For a brand the model doesn't know, the name, website and focus areas must appear in your own words, so it can't invent them; for one it knows, you see and confirm everything it drafted.
+- Every output is checked against a schema and cleaned with the built-in parser's rules. For a brand the model doesn't know, the name, websites and focus areas must appear in your own words, so it can't invent them; for one it knows, you see and confirm everything it drafted.
 - Messages with links or markup are dropped, and Pip uses its own wording when the model's doesn't fit.
 - Your messages are passed as quoted data, capped at 500 characters, with instructions to ignore any requests inside them.
 
@@ -142,7 +144,7 @@ The scoring is deliberately simple so you can explain it to your team. It lives 
 - **Mention rate** is answers mentioning the brand divided by all answers.
 - **Share of voice** is a brand's mentions divided by all brand mentions, overall or within one assistant's answers.
 - **Rivals** are the competitors you list, plus any brand that appears as a list item in at least two answers.
-- **Sources** are the provider's citations plus links written into the answer, with tracking parameters such as `utm_source` removed, deduplicated per answer and grouped by domain.
+- **Sources** are the provider's citations plus links written into the answer, with tracking parameters such as `utm_source` removed, deduplicated per answer and grouped by domain. Citations of any of the brand's sites, subdomains included, count as its own.
 - **Sentiment** is a light word list around each mention with negation handling. It's a direction, not a verdict.
 
 ## Project layout

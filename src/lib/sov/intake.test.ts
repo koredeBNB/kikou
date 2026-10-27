@@ -11,8 +11,10 @@ import {
   readCount,
   readPlanReply,
   readProduct,
+  readSiteChanges,
+  readSitesReply,
   readTopics,
-  readWebsite,
+  readWebsites,
   takeTopics,
 } from "@/lib/sov/intake";
 
@@ -295,22 +297,72 @@ describe("readAudience", () => {
   });
 });
 
-describe("readWebsite", () => {
+describe("readWebsites", () => {
   it("reads a domain, even inside a sentence", () => {
-    expect(readWebsite("acme.com")).toEqual({ kind: "ok", value: "acme.com" });
-    expect(readWebsite("https://www.acme.com/")).toEqual({ kind: "ok", value: "acme.com" });
-    expect(readWebsite("it's fernly.app")).toEqual({ kind: "ok", value: "fernly.app" });
+    expect(readWebsites("acme.com")).toEqual({ kind: "ok", value: ["acme.com"] });
+    expect(readWebsites("https://www.acme.com/")).toEqual({ kind: "ok", value: ["acme.com"] });
+    expect(readWebsites("it's fernly.app")).toEqual({ kind: "ok", value: ["fernly.app"] });
+  });
+
+  it("reads every domain in order, dropping repeats and subdomains of ones listed", () => {
+    expect(readWebsites("fernly.app, and fernly.dev for the docs")).toEqual({ kind: "ok", value: ["fernly.app", "fernly.dev"] });
+    expect(readWebsites("bnbchain.org; docs.bnbchain.org; https://www.bnbchain.org/en and bnb.org")).toEqual({
+      kind: "ok",
+      value: ["bnbchain.org", "bnb.org"],
+    });
   });
 
   it.each(["don't have one", "not yet", "we don't have a website yet", "none", "n/a", "skip", "coming soon", "no site"])(
     "skips %j",
     (reply) => {
-      expect(readWebsite(reply)).toEqual({ kind: "skip" });
+      expect(readWebsites(reply)).toEqual({ kind: "skip" });
     },
   );
 
   it("calls a reply without a domain unclear", () => {
-    expect(readWebsite("our site is being rebuilt")).toEqual({ kind: "unclear" });
+    expect(readWebsites("our site is being rebuilt")).toEqual({ kind: "unclear" });
+  });
+});
+
+describe("readSiteChanges", () => {
+  it("splits the domains a reply adds from the ones it rules out", () => {
+    expect(readSiteChanges("also bnb.org")).toEqual({ add: ["bnb.org"], remove: [] });
+    expect(readSiteChanges("drop bnb.org")).toEqual({ add: [], remove: ["bnb.org"] });
+    expect(readSiteChanges("it's bnb.org, not bnbchain.org")).toEqual({ add: ["bnb.org"], remove: ["bnbchain.org"] });
+    expect(readSiteChanges("remove the docs.acme.io one and add acme.dev")).toEqual({ add: ["acme.dev"], remove: ["docs.acme.io"] });
+    expect(readSiteChanges("that's all")).toEqual({ add: [], remove: [] });
+  });
+});
+
+describe("readSitesReply", () => {
+  const current = ["bnbchain.org"];
+
+  it.each(["that's all", "That's it!", "no others", "nothing else", "just that one", "yes", "looks right", "no", "Yep, that's all", "nah that's it thanks", "no thanks"])("keeps the sites on %j", (reply) => {
+    expect(readSitesReply(reply, current)).toEqual({ kind: "keep" });
+  });
+
+  it("adds to the sites, or swaps them when the reply says they're wrong", () => {
+    expect(readSitesReply("also bnb.org", current)).toEqual({ kind: "set", sites: ["bnbchain.org", "bnb.org"] });
+    expect(readSitesReply("yes, plus https://www.bnb.org/en", current)).toEqual({ kind: "set", sites: ["bnbchain.org", "bnb.org"] });
+    expect(readSitesReply("no, it's bnb.org", current)).toEqual({ kind: "set", sites: ["bnb.org"] });
+    expect(readSitesReply("actually it's bnb.org", current)).toEqual({ kind: "set", sites: ["bnb.org"] });
+    expect(readSitesReply("no, we also have bnb.org", current)).toEqual({ kind: "set", sites: ["bnbchain.org", "bnb.org"] });
+    expect(readSitesReply("it's bnb.org, not bnbchain.org", current)).toEqual({ kind: "set", sites: ["bnb.org"] });
+  });
+
+  it("drops a site the reply rules out, subdomains included", () => {
+    expect(readSitesReply("drop bnb.org", ["bnbchain.org", "bnb.org", "docs.bnb.org"])).toEqual({ kind: "set", sites: ["bnbchain.org"] });
+  });
+
+  it("reads a first site, or no site at all, when there are none yet", () => {
+    expect(readSitesReply("fernly.app and fernly.dev", [])).toEqual({ kind: "set", sites: ["fernly.app", "fernly.dev"] });
+    for (const reply of ["skip", "none", "we don't have a website yet", "that's all"]) expect(readSitesReply(reply, [])).toEqual({ kind: "none" });
+  });
+
+  it("leaves anything else to the model", () => {
+    expect(readSitesReply("what counts as a site?", current)).toEqual({ kind: "unclear" });
+    expect(readSitesReply("we have a docs site too", current)).toEqual({ kind: "unclear" });
+    expect(readSitesReply("yes", [])).toEqual({ kind: "unclear" });
   });
 });
 

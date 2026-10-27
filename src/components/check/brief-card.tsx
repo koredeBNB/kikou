@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { BriefDraft } from "@/lib/intake/brief";
+import { ownDomains } from "@/lib/sov/citations";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -16,6 +17,7 @@ const Empty = ({ children }: { children: ReactNode }) => <span className="text-i
 /** The brief Pip drafted, for the user to confirm or correct. */
 export function BriefCard({ brief }: { brief: BriefDraft }) {
   const topics = brief.topics ?? [];
+  const sites = ownDomains(brief);
   return (
     <div className="space-y-3">
       <div>
@@ -29,11 +31,13 @@ export function BriefCard({ brief }: { brief: BriefDraft }) {
           </Badge>
         </Row>
         <Row label="For">{brief.audience || <Empty>Everyone</Empty>}</Row>
-        <Row label="Website">
-          {brief.website ? (
+        <Row label={sites.length > 1 ? "Websites" : "Website"}>
+          {sites.length ? (
             <>
-              {brief.website}
-              <span className="block text-xs text-ink-soft">Citations of this site count as yours</span>
+              {sites.join(", ")}
+              <span className="block text-xs text-ink-soft">
+                Citations of {sites.length > 1 ? "these sites" : "this site"} count as yours
+              </span>
             </>
           ) : (
             <Empty>None yet. I&apos;ll ask, since it&apos;s how I spot your citations</Empty>

@@ -121,4 +121,11 @@ describe("rulesTurn", () => {
   it("reads a website", () => {
     expect(rulesTurn("website", "it's fernly.app")).toEqual({ intent: "answer", values: { website: "fernly.app" } });
   });
+
+  it("reads several websites, the first as the main one", () => {
+    expect(rulesTurn("website", "fernly.app, plus docs.fernly.app and fernly.dev for the blog")).toEqual({
+      intent: "answer",
+      values: { website: "fernly.app", otherSites: ["fernly.dev"] },
+    });
+  });
 });

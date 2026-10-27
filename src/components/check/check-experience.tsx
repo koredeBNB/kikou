@@ -27,7 +27,7 @@ import { useCheckRun, type RunState } from "@/hooks/use-check-run";
 import { useThrottled } from "@/hooks/use-throttled";
 import { ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
-import { MAX_EARLIER, type BriefDraft, type Identified } from "@/lib/intake/brief";
+import { MAX_EARLIER, sameBrief, type BriefDraft, type Identified } from "@/lib/intake/brief";
 import {
   acceptDraft,
   acceptedLine,
@@ -39,6 +39,8 @@ import {
   emptyIntake,
   lookingUpLine,
   questionCount,
+  settleSites,
+  SITES_COPY,
   toBrief,
   topicExamples,
   unknownLine,
@@ -48,7 +50,8 @@ import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/
 import { budgetNote } from "@/lib/sov/budget";
 import { canSwitchSearch, estimateFor, estimateLine } from "@/lib/sov/estimate";
 import { classifyIntent, MAX_QUESTIONS } from "@/lib/sov/generate";
-import { isAgreement, isRejection, readPlanReply } from "@/lib/sov/intake";
+import { ownDomains } from "@/lib/sov/citations";
+import { isAgreement, isRejection, readPlanReply, readSitesReply } from "@/lib/sov/intake";
 import { planMessage, writingMessage } from "@/lib/sov/plan-copy";
 import { normalizeBrief } from "@/lib/sov/questions";
 import { requestQuestions } from "@/lib/sov/request-questions";
@@ -434,6 +437,40 @@ export function CheckExperience() {
     if (revision.proceed) await acceptBrief(revision.brief, count);
   };
 
+  /** Records the brand's sites once Pip has asked about them, then asks for the count or writes the plan. */
+  const settleSitesStep = async (
+    brief: BriefDraft,
+    sites: string[] | "keep",
+    { waited = 0, count = intake.count, changed = false }: { waited?: number; count?: number; changed?: boolean } = {},
+  ) => {
+    const settled = settleSites(acceptDraft(draftIntake(brief, count)).state, sites);
+    const next = { ...brief, ...toBrief(settled.state) };
+    setIntake(settled.state);
+    setProposed(next);
+    await speak([...(changed ? [{ kind: "brief" as const, brief: next }] : []), { kind: "text", mood: "happy", text: settled.text }], waited);
+    if (settled.next === "review") await goReview(toBrief(settled.state), questionCount(settled.state));
+    else setStep(settled.next);
+  };
+
+  /** Pip asked whether the brand's sites are right and complete. Plain answers are read by the rules; anything else by the model. */
+  const handleSites = async (text: string, brief: BriefDraft) => {
+    const rules = readSitesReply(text, ownDomains(brief));
+    if (rules.kind === "keep") return settleSitesStep(brief, "keep");
+    if (rules.kind === "none") return settleSitesStep(brief, []);
+    setTyping(true);
+    const elapsed = stopwatch();
+    const revision = await requestRevision({ reply: text, brief, stage: "sites" });
+    const waited = elapsed();
+    const count = revision && "count" in revision ? (revision.count ?? intake.count) : intake.count;
+    if (revision?.kind === "accept") return settleSitesStep(brief, "keep", { waited, count });
+    if (revision?.kind === "change") {
+      const changed = !sameBrief({ ...revision.brief, website: brief.website, otherSites: brief.otherSites }, brief);
+      return settleSitesStep(revision.brief, ownDomains(revision.brief), { waited, count, changed });
+    }
+    if (rules.kind === "set") return settleSitesStep(brief, rules.sites, { waited });
+    await speak([{ kind: "text", text: SITES_COPY.unclear }], waited);
+  };
+
   const addQuestion = async (text: string, waited = 0) => {
     if (planned.length >= MAX_QUESTIONS) {
       await speak([{ kind: "text", text: `That's the most I can ask in one check (${MAX_QUESTIONS} questions). Remove one to make room.` }], waited);
@@ -539,6 +576,7 @@ export function CheckExperience() {
     }
     append({ id: uid(), role: "user", text });
     if (step === "product") return handleProduct(text, brand);
+    if (step === "website" && proposed) return handleSites(text, proposed);
     if (isIntakeStep(step)) return handleIntake(step, text, intake);
     if (step === "confirm" && proposed) return handleConfirm(text, proposed);
     if (step === "review") return handleReview(text);
@@ -570,6 +608,7 @@ export function CheckExperience() {
       case "competitors":
         return ["Skip"];
       case "website": {
+        if (intake.website) return ["That's all"];
         const guess = guessDomain(intake.product);
         return guess ? [guess, "Skip"] : ["Skip"];
       }
@@ -781,7 +820,13 @@ export function CheckExperience() {
                 value={input}
                 onChange={setInput}
                 onSubmit={submit}
-                placeholder={step === "product" && brand.earlier.length ? "Tell Pip in a few words…" : PLACEHOLDERS[step]}
+                placeholder={
+                  step === "product" && brand.earlier.length
+                    ? "Tell Pip in a few words…"
+                    : step === "website" && intake.website
+                      ? "e.g. “that's all” or “also acme.dev”"
+                      : PLACEHOLDERS[step]
+                }
                 disabled={typing || step === "running"}
                 providers={providers}
                 autoFocus

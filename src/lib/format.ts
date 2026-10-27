@@ -10,9 +10,9 @@ export function ordinal(n: number): string {
   return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
 }
 
-export function listJoin(items: string[]): string {
+export function listJoin(items: string[], conjunction = "and"): string {
   if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return `${items.slice(0, -1).join(", ")} ${conjunction} ${items[items.length - 1]}`;
 }
 
 export const INTENT_LABELS: Record<QuestionIntent, string> = {

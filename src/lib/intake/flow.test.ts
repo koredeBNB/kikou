@@ -10,6 +10,8 @@ import {
   nextField,
   questionCount,
   questionFor,
+  settleSites,
+  SITES_COPY,
   toBrief,
 } from "@/lib/intake/flow";
 import type { IntakeState, OptionalField } from "@/lib/intake/types";
@@ -283,22 +285,18 @@ describe("drafted briefs", () => {
     expect(applyTurn(accepted.state, "website", { intent: "skip", values: {} }).next).toBe("count");
   });
 
-  it("asks only for the count when the draft has a website", () => {
+  it("still asks about the website when the draft has one, naming every site it'll count", () => {
     const accepted = acceptDraft(draftIntake({ ...drafted, website: "bnbchain.org" }));
-    expect(accepted.next).toBe("count");
+    expect(accepted.next).toBe("website");
     expect(accepted.state.skipped).toEqual(["audience"]);
-    expect(acceptedLine(accepted.state, accepted.next)).toBe(`Great, that's the brief sorted. ${questionFor("count", accepted.state)}`);
+    expect(acceptedLine(accepted.state, accepted.next)).toBe(
+      "Great, nearly there. I'll count citations of **bnbchain.org** as yours, subdomains included. Got any other sites, like a separate docs or blog domain? List them, fix that one if it's wrong, or say “that's all”.",
+    );
+    const two = acceptDraft(draftIntake({ ...drafted, website: "bnbchain.org", otherSites: ["bnb.org"] }));
+    expect(questionFor("website", two.state)).toMatch(/^I'll count citations of \*\*bnbchain\.org\*\* and \*\*bnb\.org\*\* as yours.*fix these if/);
   });
 
-  it("goes straight to the plan when the draft has a website and the user already said how many questions", () => {
-    const withSite = { ...drafted, website: "bnbchain.org" };
-    const accepted = acceptDraft(draftIntake(withSite, 25));
-    expect(accepted.next).toBe("review");
-    expect(acceptedLine(accepted.state, accepted.next)).toBe("Great, that's the brief sorted.");
-    expect(toBrief(accepted.state)).toEqual(withSite);
-  });
-
-  it("still asks for a missing website when the user already said how many questions", () => {
+  it("still asks about the website when the user already said how many questions", () => {
     const accepted = acceptDraft(draftIntake(drafted, 25));
     expect(accepted.next).toBe("website");
     expect(applyTurn(accepted.state, "website", { intent: "skip", values: {} }).next).toBe("review");
@@ -308,5 +306,42 @@ describe("drafted briefs", () => {
     expect(draftLine({ ...drafted, description: "the Layer 1 blockchain behind BNB" }, { known: true })).toMatch(/^Do you mean \*\*BNB Chain\*\*, the Layer 1 blockchain behind BNB\?/);
     expect(draftLine(drafted, { known: true, web: true })).toMatch(/^I looked it up\. Is it \*\*BNB Chain\*\*, a layer 1 blockchain\?/);
     expect(draftLine(drafted, { known: false })).toMatch(/^I don't know \*\*BNB Chain\*\* yet, so I went by what you said\./);
+  });
+
+  it("reads several sites from one answer to the website question", () => {
+    const turn = { intent: "answer" as const, values: { website: "fernly.app", otherSites: ["fernly.dev", "docs.fernly.app"] } };
+    const answered = applyTurn(withState({ product: "Fernly", category: "app", audience: "a", competitors: ["Planta"] }), "website", turn);
+    expect(answered.state).toMatchObject({ website: "fernly.app", otherSites: ["fernly.dev"] });
+    expect(toBrief(answered.state)).toMatchObject({ website: "fernly.app", otherSites: ["fernly.dev"] });
+    const skipped = applyTurn(answered.state, "website", { intent: "skip", values: {} });
+    expect(skipped.state.website).toBeUndefined();
+    expect(skipped.state.otherSites).toBeUndefined();
+  });
+});
+
+describe("settleSites", () => {
+  const drafted = { product: "BNB Chain", category: "layer 1 blockchain", audience: "", competitors: ["Ethereum"], topics: ["RWA", "AI"], website: "bnbchain.org" };
+  const accepted = (count?: number) => acceptDraft(draftIntake(drafted, count)).state;
+
+  it("keeps the drafted sites and asks for the count", () => {
+    const settled = settleSites(accepted(), "keep");
+    expect(settled.state.website).toBe("bnbchain.org");
+    expect(settled.next).toBe("count");
+    expect(settled.text).toBe(`${SITES_COPY.kept} ${questionFor("count", settled.state)}`);
+  });
+
+  it("records new sites, main one first, and says which it'll count", () => {
+    const settled = settleSites(accepted(25), ["bnbchain.org", "bnb.org", "docs.bnbchain.org"]);
+    expect(toBrief(settled.state)).toMatchObject({ website: "bnbchain.org", otherSites: ["bnb.org"] });
+    expect(settled.next).toBe("review");
+    expect(settled.text).toBe("Got it: I'll count citations of **bnbchain.org** and **bnb.org** as yours.");
+  });
+
+  it("skips the website when there are no sites left", () => {
+    const settled = settleSites(accepted(), []);
+    expect(settled.state.website).toBeUndefined();
+    expect(settled.state.skipped).toContain("website");
+    expect(settled.next).toBe("count");
+    expect(settled.text).toMatch(/^No problem, we'll go without it\. Last one/);
   });
 });

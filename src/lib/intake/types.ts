@@ -15,6 +15,8 @@ export interface IntakeValues {
   audience?: string;
   competitors?: string[];
   website?: string;
+  /** More of the product's own domains, when the reply gives several. */
+  otherSites?: string[];
   /** Focus areas to research within the category, e.g. "trading", "RWA". */
   topics?: string[];
   /** How many questions to ask each assistant. */
@@ -43,6 +45,7 @@ export interface IntakeState {
   audience: string;
   competitors: string[];
   website?: string;
+  otherSites?: string[];
   topics: string[];
   count?: number;
   skipped: IntakeField[];

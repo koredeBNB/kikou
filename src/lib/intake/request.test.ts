@@ -45,6 +45,17 @@ describe("validateIntakeRequest", () => {
     }
   });
 
+  it("keeps the brand's other sites as clean domains, and leaves them off when there are none", () => {
+    const parsed = validateIntakeRequest({
+      field: "website",
+      reply: "also fernly.dev",
+      state: { product: "Fernly", website: "fernly.app", otherSites: ["https://www.fernly.dev/docs", "blog.fernly.dev", "nope", 4], skipped: [] },
+    });
+    expect(parsed.ok && parsed.value.state.otherSites).toEqual(["fernly.dev"]);
+    const none = validateIntakeRequest({ field: "website", reply: "x", state: { product: "Fernly", otherSites: [] } });
+    expect(none.ok && "otherSites" in none.value.state).toBe(false);
+  });
+
   it.each([
     ["no body", null],
     ["an unknown field", { field: "pricing", reply: "x", state: {} }],
@@ -148,6 +159,14 @@ describe("validateBriefRequest", () => {
     expect(validateBriefRequest({ mode: "revise", reply: "x", brief: { product: "A", category: "crm", competitors: [] }, stage: "plan" })).toMatchObject({
       value: { stage: "plan" },
     });
+    expect(
+      validateBriefRequest({
+        mode: "revise",
+        reply: "also bnb.org",
+        brief: { product: "BNB Chain", category: "blockchain", competitors: [], website: "bnbchain.org", otherSites: ["https://bnb.org/", "docs.bnbchain.org", 3] },
+        stage: "sites",
+      }),
+    ).toMatchObject({ value: { stage: "sites", brief: { website: "bnbchain.org", otherSites: ["bnb.org"] } } });
   });
 
   it.each([
@@ -168,7 +187,7 @@ describe("brief requests", () => {
     name: "Attio",
     description: "a CRM for modern teams",
     category: "crm",
-    website: "attio.com",
+    websites: ["attio.com"],
     audience: "startups",
     competitors: ["HubSpot"],
     topics: [],

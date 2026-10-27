@@ -17,7 +17,7 @@ const known = (patch: Record<string, unknown> = {}) => ({
   name: "BNB Chain",
   description: "the Layer 1 blockchain behind the BNB token",
   category: "layer 1 blockchain",
-  website: "bnbchain.org",
+  websites: ["bnbchain.org"],
   audience: "web3 developers and traders",
   competitors: ["Ethereum", "Solana", "Polygon", "Avalanche", "Arbitrum", "Sui"],
   topics: ["RWA tokenization", "trading", "AI"],
@@ -32,7 +32,7 @@ const unknownOutput = (patch: Record<string, unknown> = {}) => ({
   name: "Fernly",
   description: null,
   category: "plant care app",
-  website: null,
+  websites: [],
   audience: "new plant parents",
   competitors: ["Planta", "Greg"],
   topics: [],
@@ -60,7 +60,7 @@ const revision = (patch: Record<string, unknown> = {}, brief: Record<string, unk
     description: BNB.description,
     category: BNB.category,
     audience: BNB.audience,
-    website: BNB.website,
+    websites: [BNB.website],
     competitors: BNB.competitors,
     topics: BNB.topics,
     ...brief,
@@ -103,15 +103,29 @@ describe("parseIdentified", () => {
 
   it("drafts an unknown brand from the user's own words, with rivals of that kind", () => {
     const reply = "Fernly, a plant care app for new plant parents";
-    const output = unknownOutput({ description: "a plant app", website: "fernly.app", topics: ["watering", "pricing"] });
+    const output = unknownOutput({ description: "a plant app", websites: ["fernly.app"], topics: ["watering", "pricing"] });
     expect(parseIdentified(output, { reply, earlier: [] })).toEqual({
       kind: "draft",
       known: false,
       brief: { product: "Fernly", category: "plant care app", audience: "new plant parents", competitors: ["Planta", "Greg"] },
       message: "I don't know **Fernly** yet, so I went by what you said.",
     });
-    const withSite = parseIdentified(unknownOutput({ website: "fernly.app", topics: ["watering"] }), { reply: "Fernly, plant care app, fernly.app, watering", earlier: [] });
+    const withSite = parseIdentified(unknownOutput({ websites: ["fernly.app", "fernly.dev"], topics: ["watering"] }), { reply: "Fernly, plant care app, fernly.app, watering", earlier: [] });
     expect(withSite).toMatchObject({ brief: { website: "fernly.app", topics: ["watering"] } });
+    expect(withSite && "brief" in withSite ? withSite.brief.otherSites : "missing").toBeUndefined();
+  });
+
+  it("drafts up to three of a known brand's own sites, main one first, leaving out subdomains", () => {
+    const websites = ["https://www.binance.com/en", "academy.binance.com", "binance.us", "bnbchain.org", "binance.info", "not a domain"];
+    expect(parseIdentified(known({ name: "Binance", websites }), { reply: "binance", earlier: [] })).toMatchObject({
+      brief: { website: "binance.com", otherSites: ["binance.us", "bnbchain.org"] },
+    });
+  });
+
+  it("takes an unknown brand's sites only from the user's words", () => {
+    const reply = "Fernly, a plant care app, fernly.app and fernly.dev";
+    const parsed = parseIdentified(unknownOutput({ websites: ["fernly.app", "fernly.com", "fernly.dev"] }), { reply, earlier: [] });
+    expect(parsed).toMatchObject({ brief: { website: "fernly.app", otherSites: ["fernly.dev"] } });
   });
 
   it("says a brand is unknown when it can't tell what it is, without the model's message", () => {
@@ -141,7 +155,7 @@ describe("parseIdentified", () => {
   });
 
   it("reads a follow-up together with the earlier reply that named the brand", () => {
-    const output = known({ name: "Mercury", description: "the business bank for startups", category: "business bank", website: "mercury.com", topics: [] });
+    const output = known({ name: "Mercury", description: "the business bank for startups", category: "business bank", websites: ["mercury.com"], topics: [] });
     expect(parseIdentified(output, { reply: "the bank one", earlier: ["Mercury"] })).toMatchObject({ kind: "draft", known: true, brief: { product: "Mercury" } });
   });
 
@@ -151,7 +165,7 @@ describe("parseIdentified", () => {
   });
 
   it("needs a web lookup to find exactly the name the user wrote", () => {
-    const lookup = known({ name: "Vexoria Labs", description: "a security firm", category: "security software", website: "vexoria.io", topics: [] });
+    const lookup = known({ name: "Vexoria Labs", description: "a security firm", category: "security software", websites: ["vexoria.io"], topics: [] });
     expect(parseIdentified(lookup, { reply: "Vexorial Labs", earlier: [] }, true)).toBeNull();
     expect(parseIdentified({ ...lookup, name: "VexorialLabs" }, { reply: "vexorial labs", earlier: [] }, true)).toBeNull();
     expect(parseIdentified({ ...lookup, name: "Vexorial Labs" }, { reply: "vexorial labs", earlier: [] }, true)).toMatchObject({
@@ -200,6 +214,20 @@ describe("parseRevision", () => {
     expect(audience).toMatchObject({ brief: { description: BNB.description, audience: "institutions" } });
   });
 
+  it("adds, swaps and drops the brand's own sites", () => {
+    const sites = { ...input, stage: "sites" as const };
+    expect(parseRevision(revision({}, { websites: ["bnbchain.org", "bnb.org"] }), { ...sites, reply: "also bnb.org" })).toMatchObject({
+      kind: "change",
+      brief: { website: "bnbchain.org", otherSites: ["bnb.org"] },
+    });
+    const swapped = parseRevision(revision({}, { websites: ["bnb.org"] }), { ...sites, reply: "it's bnb.org, not bnbchain.org" });
+    expect(swapped).toMatchObject({ kind: "change", brief: { website: "bnb.org" } });
+    const dropped = parseRevision(revision({}, { websites: ["bnbchain.org"] }), { ...sites, brief: { ...BNB, otherSites: ["bnb.org"] }, reply: "drop bnb.org" });
+    expect(dropped && "brief" in dropped ? dropped.brief : null).toMatchObject({ website: "bnbchain.org" });
+    expect(dropped && "brief" in dropped ? dropped.brief.otherSites : "missing").toBeUndefined();
+    expect(parseRevision(revision({ intent: "accept" }), { ...sites, reply: "that's all" })).toEqual({ kind: "accept" });
+  });
+
   it("keeps the old category when the new one is unusable", () => {
     expect(parseRevision(revision({}, { category: "", topics: ["RWA", "AI"] }), input)).toMatchObject({ brief: { category: "layer 1 blockchain", topics: ["RWA", "AI"] } });
   });
@@ -241,10 +269,12 @@ describe("prompts", () => {
   it("sends the whole brief and the stage for a revision, with empty fields as null", () => {
     const { user } = buildRevisePrompt({ reply: "add Base", brief: { product: "Fernly", category: "plant care app", audience: "", competitors: [] }, stage: "plan" });
     expect(JSON.parse(user)).toEqual({
-      brief: { product: "Fernly", description: null, category: "plant care app", audience: null, website: null, competitors: [], topics: [] },
+      brief: { product: "Fernly", description: null, category: "plant care app", audience: null, websites: [], competitors: [], topics: [] },
       stage: "plan",
       reply: "add Base",
     });
+    const withSites = buildRevisePrompt({ reply: "that's all", brief: { ...BNB, otherSites: ["bnb.org", "docs.bnbchain.org"] }, stage: "sites" });
+    expect(JSON.parse(withSites.user)).toMatchObject({ brief: { websites: ["bnbchain.org", "bnb.org"] }, stage: "sites" });
   });
 
   it("treats the user's words as data, in every prompt", () => {
@@ -259,5 +289,10 @@ describe("sameBrief", () => {
     const reworded: BriefDraft = { ...BNB, description: "something else", competitors: ["ethereum", "solana", "polygon"] };
     expect(sameBrief(BNB, reworded)).toBe(true);
     expect(sameBrief(BNB, { ...BNB, topics: ["RWA", "AI"] })).toBe(false);
+  });
+
+  it("compares the brand's own sites, however they're written", () => {
+    expect(sameBrief(BNB, { ...BNB, website: "https://www.bnbchain.org/" })).toBe(true);
+    expect(sameBrief(BNB, { ...BNB, otherSites: ["bnb.org"] })).toBe(false);
   });
 });

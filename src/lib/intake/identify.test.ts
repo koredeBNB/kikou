@@ -8,7 +8,7 @@ const output = {
   name: "BNB Chain",
   description: "the Layer 1 blockchain behind the BNB token",
   category: "layer 1 blockchain",
-  website: "bnbchain.org",
+  websites: ["bnbchain.org"],
   audience: "web3 developers",
   competitors: ["Ethereum", "Solana"],
   topics: ["RWA", "AI"],
@@ -66,7 +66,7 @@ describe("identifyBrand", () => {
 
 describe("lookUpBrand", () => {
   it("asks for three web results and checks the name against the user's words", async () => {
-    const { fetchImpl, bodies } = replying({ ...output, name: "Attio", category: "crm", website: "attio.com" }, 0.008);
+    const { fetchImpl, bodies } = replying({ ...output, name: "Attio", category: "crm", websites: ["attio.com"] }, 0.008);
     expect(await lookUpBrand({ reply: "Attio", earlier: [] }, { env, fetchImpl })).toMatchObject({ ok: true, costUsd: 0.008 });
     expect(bodies[0].plugins).toEqual([{ id: "web", engine: "exa", max_results: 3 }]);
     const renamed = replying({ ...output, name: "Attica" }, 0.008);
@@ -84,7 +84,7 @@ describe("reviseBrief", () => {
     const change = {
       intent: "change",
       proceed: false,
-      brief: { ...brief, description: null, audience: null, website: null, competitors: ["Ethereum", "Base"], topics: [] },
+      brief: { ...brief, description: null, audience: null, websites: [], competitors: ["Ethereum", "Base"], topics: [] },
       question: null,
       count: null,
       message: "Done: I added Base.",

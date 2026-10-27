@@ -13,14 +13,14 @@ describe("INTAKE_JSON_SCHEMA", () => {
   it("is a strict schema that requires every key", () => {
     expect(INTAKE_JSON_SCHEMA.additionalProperties).toBe(false);
     expect(INTAKE_JSON_SCHEMA.required).toEqual(["intent", "values", "skips", "asks", "message"]);
-    expect(INTAKE_JSON_SCHEMA.properties.values.required).toEqual(["product", "category", "audience", "competitors", "website", "topics", "count"]);
+    expect(INTAKE_JSON_SCHEMA.properties.values.required).toEqual(["product", "category", "audience", "competitors", "website", "topics", "count", "otherSites"]);
     expect(INTAKE_JSON_SCHEMA.properties.intent.enum).toEqual(["answer", "skip", "unclear"]);
     expect(INTAKE_JSON_SCHEMA.properties.skips.items.enum).toEqual(["audience", "competitors", "website", "topics", "count"]);
   });
 });
 
 describe("parseIntakeTurn topics and count", () => {
-  const blank = { product: null, category: null, audience: null, competitors: null, website: null, topics: null, count: null };
+  const blank = { product: null, category: null, audience: null, competitors: null, website: null, topics: null, count: null, otherSites: null };
   const turnWith = (values: Record<string, unknown>, asks = "review") => ({ intent: "answer", values: { ...blank, ...values }, skips: [], asks, message: "Got it." });
 
   it("keeps only the topics the reply names, up to five", () => {
@@ -145,6 +145,19 @@ describe("parseIntakeTurn", () => {
       competitors: ["Planta"],
       website: "fernly.app",
     });
+  });
+
+  it("keeps the further sites the reply names, without repeats or subdomains of the main one", () => {
+    const turn = parseIntakeTurn(
+      {
+        intent: "answer",
+        values: { product: null, category: null, audience: null, competitors: null, website: "fernly.app", otherSites: ["https://fernly.dev/", "docs.fernly.app", "fernly.io"] },
+        asks: "review",
+        message: "Noted.",
+      },
+      "fernly.app, docs.fernly.app and fernly.dev",
+    );
+    expect(turn?.values).toEqual({ website: "fernly.app", otherSites: ["fernly.dev"] });
   });
 
   it("drops a category or audience that's really a sentence", () => {

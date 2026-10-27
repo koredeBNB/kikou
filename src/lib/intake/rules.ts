@@ -1,4 +1,5 @@
 import type { IntakeField, IntakeTurn } from "@/lib/intake/types";
+import { siteFields } from "@/lib/sov/citations";
 import {
   readAudience,
   readCategory,
@@ -6,7 +7,7 @@ import {
   readCount,
   readProduct,
   readTopics,
-  readWebsite,
+  readWebsites,
   takeCompetitorSkip,
   takeTopics,
   takeWebsite,
@@ -24,7 +25,7 @@ function fromReply<T>(reply: Reply<T>, values: (value: T) => IntakeTurn["values"
 
 /** The rule-based reading of a reply: used without a model, and whenever the model fails. */
 export function rulesTurn(field: IntakeField, reply: string): IntakeTurn {
-  if (field === "website") return fromReply(readWebsite(reply), (website) => ({ website }));
+  if (field === "website") return fromReply(readWebsites(reply), siteFields);
   if (field === "topics") return fromReply(readTopics(reply), (topics) => ({ topics }));
   if (field === "count") {
     const read = readCount(reply);

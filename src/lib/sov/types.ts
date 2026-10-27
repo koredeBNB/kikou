@@ -13,7 +13,10 @@ export interface Brief {
   category: string;
   audience: string;
   competitors: string[];
+  /** The brand's main site. Citations of it, or of any of `otherSites`, count as the brand's own. */
   website?: string;
+  /** Further sites of the brand's own, e.g. a separate docs or blog domain. */
+  otherSites?: string[];
   /** Focus areas to split the questions across. None means a broad check. */
   topics?: string[];
 }

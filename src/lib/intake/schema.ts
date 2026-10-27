@@ -8,7 +8,7 @@ import {
   type IntakeValues,
   type OptionalField,
 } from "@/lib/intake/types";
-import { siteDomain } from "@/lib/sov/citations";
+import { siteDomain, siteFields } from "@/lib/sov/citations";
 import { looksLikeName, MAX_QUESTION_COUNT, MAX_TOPICS, readAudience, readCategory, readCount } from "@/lib/sov/intake";
 
 const INTENTS: IntakeIntent[] = ["answer", "skip", "unclear"];
@@ -30,13 +30,14 @@ export const INTAKE_JSON_SCHEMA = {
     values: {
       type: "object",
       additionalProperties: false,
-      required: [...INTAKE_FIELDS],
+      required: [...INTAKE_FIELDS, "otherSites"],
       properties: {
         product: nullable("string"),
         category: nullable("string"),
         audience: nullable("string"),
         competitors: { ...nullable("array"), items: { type: "string" } },
         website: nullable("string"),
+        otherSites: { ...nullable("array"), items: { type: "string" } },
         topics: { ...nullable("array"), items: { type: "string" } },
         count: nullable("integer"),
       },
@@ -101,7 +102,7 @@ function cleanValues(values: Json, reply: string, field?: IntakeField): { values
     if (value !== undefined && value !== null && typeof value !== "string") return null;
   }
   const rawCompetitors = values.competitors;
-  for (const key of ["competitors", "topics"] as const) {
+  for (const key of ["competitors", "topics", "otherSites"] as const) {
     const value = values[key];
     if (value !== undefined && value !== null && !isStringList(value)) return null;
   }
@@ -133,10 +134,10 @@ function cleanValues(values: Json, reply: string, field?: IntakeField): { values
     if (competitors.length) out.competitors = competitors;
   }
 
-  if (typeof values.website === "string") {
-    const domain = siteDomain(values.website.trim());
-    if (domain && inReply(domain, reply)) out.website = domain;
-  }
+  const sites = [values.website, ...(Array.isArray(values.otherSites) ? values.otherSites : [])].filter((s): s is string => typeof s === "string");
+  const { website, otherSites } = siteFields(sites.filter((site) => inReply(siteDomain(site.trim()) ?? "", reply)));
+  if (website) out.website = website;
+  if (otherSites) out.otherSites = otherSites;
 
   if (Array.isArray(values.topics)) {
     const seen = new Set<string>();

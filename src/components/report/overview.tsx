@@ -28,6 +28,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { listJoin, ordinal, pct, rankLabel } from "@/lib/format";
+import { ownDomains } from "@/lib/sov/citations";
 import type { StoredRun } from "@/lib/sov/storage";
 import { MODEL_LABELS, type ModelId, type Report } from "@/lib/sov/types";
 import { cn } from "@/lib/utils";
@@ -168,6 +169,7 @@ function Kpi({ icon, tint, value, label, note, help }: { icon: IconSvgElement; t
 export function KpiStack({ report }: { report: Report }) {
   const { product } = report;
   const ownCitations = report.domains.filter((d) => d.isOwn).reduce((s, d) => s + d.count, 0);
+  const sites = ownDomains(report.brief).length;
   return (
     <Card id="overview" className="h-full scroll-mt-24 gap-0 divide-y divide-border/60 py-1.5">
       <Kpi
@@ -207,7 +209,7 @@ export function KpiStack({ report }: { report: Report }) {
         tint="bg-lavender-100 text-[#5f4bb0]"
         value={String(report.totalCitations)}
         label="Sources cited"
-        note={report.brief.website ? `${ownCitations} from your site` : `${report.domains.length} domains`}
+        note={sites ? `${ownCitations} from your site${sites > 1 ? "s" : ""}` : `${report.domains.length} domains`}
         help="Links the assistants gave as sources. Assistants without web access cite fewer."
       />
     </Card>
