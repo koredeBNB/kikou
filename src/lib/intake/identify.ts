@@ -12,6 +12,7 @@ import { callStructuredModel, intakeRulesForced, resolveIntakeModel, type Intake
 import { decode } from "@/lib/intake/schema";
 import { intakeTimeout } from "@/lib/intake/understand";
 import { truthy, type Env } from "@/lib/providers/config";
+import { BRAND_REVIEW_JSON_SCHEMA, buildBrandReviewPrompt, parseBrandReview, type BrandReviewInput } from "@/lib/sov/brand-review";
 
 export type BriefFailure = "no-model" | "forced" | "timeout" | "error" | "invalid";
 
@@ -24,6 +25,7 @@ const LOOKUP_RESULTS = 3;
 const IDENTIFY_SPEC: StructuredSpec = { name: "brand_brief", schema: IDENTIFY_JSON_SCHEMA, maxTokens: 600, temperature: 0 };
 const LOOKUP_SPEC: StructuredSpec = { ...IDENTIFY_SPEC, webResults: LOOKUP_RESULTS };
 const REVISE_SPEC: StructuredSpec = { name: "brief_revision", schema: REVISE_JSON_SCHEMA, maxTokens: 700, temperature: 0 };
+const BRAND_REVIEW_SPEC: StructuredSpec = { name: "brand_review", schema: BRAND_REVIEW_JSON_SCHEMA, maxTokens: 600, temperature: 0 };
 
 /** Web lookups go through OpenRouter's web plugin; `SOV_INTAKE_WEB_LOOKUP=false` turns them off. */
 export function lookupSetting(env: Env): IntakeModelSetting | null {
@@ -86,4 +88,9 @@ export function lookUpBrand(input: IdentifyInput, options: CallOptions): Promise
 /** Reads what the user wants changed in the brief. */
 export function reviseBrief(input: ReviseInput, options: CallOptions): Promise<BriefCall> {
   return run(resolveIntakeModel(options.env), buildRevisePrompt(input), REVISE_SPEC, (o) => parseRevision(o, input) !== null, options);
+}
+
+/** Checks the brands a check's answers turned up: which aren't rivals in the category, and which are product lines. */
+export function reviewBrands(input: BrandReviewInput, options: CallOptions): Promise<BriefCall> {
+  return run(resolveIntakeModel(options.env), buildBrandReviewPrompt(input), BRAND_REVIEW_SPEC, (o) => parseBrandReview(o, input) !== null, options);
 }

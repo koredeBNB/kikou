@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { discoverBrands } from "@/lib/sov/discover";
+import { discoverBrands, discoverCandidates } from "@/lib/sov/discover";
 
 const answerA = `Here are the best options:
 
@@ -153,5 +153,62 @@ describe("discoverBrands on real assistant answers", () => {
   it("merges variants before applying the answer threshold", () => {
     const merged = discoverBrands(["- **Swetrix**: cheap.", "- **Swetrix Analytics**: open source."], [], { category: "web analytics" });
     expect(merged).toEqual(["Swetrix"]);
+  });
+});
+
+describe("discoverBrands with labels and product lines", () => {
+  // Shapes from a live MetaMask check, where Solana came out ahead of MetaMask.
+  const claude = `Pick by the chain you use most:
+- **Solana:** Phantom is the usual choice.
+- **Ethereum:** MetaMask or Rabby for DeFi.
+- **Large holdings:** add a hardware wallet.`;
+  const perplexity = `- **Solana**
+  - **Phantom** – the default for Solana apps.
+  - **Solflare** – staking built in.
+- **Ethereum**
+  - **Rabby** – previews every transaction.`;
+  const list = `1. **Rabby** – built for DeFi.\n2. **Solflare** – Solana staking.\n3. **Ledger** – keeps keys offline.`;
+  const hardware = `- **Ledger Nano X** – Bluetooth, works with phones.\n- **Ledger Flex** – touchscreen.\n- **MetaMask Flask** – the developer build.`;
+  const known = ["MetaMask", "Phantom"];
+  const options = { category: "crypto wallet" };
+
+  it("skips the labels of a list whose items lead into a pick", () => {
+    const found = discoverBrands([claude, claude, perplexity, list, hardware], known, options);
+    expect(found).not.toContain("Solana");
+    expect(found).not.toContain("Ethereum");
+    expect(found).not.toContain("Large holdings");
+  });
+
+  it("skips a heading that groups the brands nested under it", () => {
+    expect(discoverBrands([perplexity, perplexity], known, options)).toEqual(["Solflare", "Rabby"]);
+  });
+
+  it("counts product lines as their brand, and as the product when they start with it", () => {
+    expect(discoverBrands([claude, claude, perplexity, list, hardware], known, options)).toEqual(["Solflare", "Rabby", "Ledger"]);
+  });
+
+  it("keeps a lone lead into another brand, and a brand with its own details or products nested under it", () => {
+    const lone = `- **Rabby:** MetaMask, with better previews.\n- **Rainbow:** friendly design.`;
+    const nested = `1. **Zengo**\n   - Keyless, no seed phrase.\n   - Free to start.\n2. **Ledger**\n   - **Ledger Nano X** – Bluetooth.\n   - **Ledger Flex** – touchscreen.`;
+    expect(discoverBrands([lone, lone], known, options)).toEqual(["Rabby", "Rainbow"]);
+    const found = discoverBrands([nested, nested], known, options);
+    expect(found).toEqual(expect.arrayContaining(["Zengo", "Ledger"]));
+    expect(found.filter((name) => name.startsWith("Ledger"))).toEqual(["Ledger"]);
+  });
+
+  it("only folds into tracked brands, not research topics", () => {
+    const text = `- **DeFi Llama** – compares yields.\n- **MetaMask Flask** – the developer build.`;
+    expect(discoverBrands([text, text], ["MetaMask", "DeFi"], { ...options, tracked: ["MetaMask"] })).toEqual(["DeFi Llama"]);
+    expect(discoverBrands([text, text], ["MetaMask", "DeFi"], options)).toEqual([]);
+  });
+});
+
+describe("discoverCandidates", () => {
+  it("returns the list item each brand was first seen in", () => {
+    const text = "- **Rabby** – previews every transaction.\n- **Rainbow**: friendly design.";
+    expect(discoverCandidates([text, text], [])).toEqual([
+      { name: "Rabby", answers: 2, context: "**Rabby** – previews every transaction." },
+      { name: "Rainbow", answers: 2, context: "**Rainbow**: friendly design." },
+    ]);
   });
 });

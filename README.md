@@ -115,7 +115,7 @@ Spending is capped per UTC day across everyone using the app: $20 by default, or
 
 Web lookups while drafting a brief book what they cost to the same daily budget, and stop once less than $0.05 of it is left. Like checks, they need Redis on Vercel.
 
-Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour), intake replies (150 an hour) and web lookups (20 an hour) have their own limits; over those, Pip quietly falls back to templates, the built-in parser or asking what the brand is. `SOV_CHECKS_PER_HOUR=off` removes all four limits.
+Each visitor (by IP address) can start 12 checks an hour, or `SOV_CHECKS_PER_HOUR`. Question plans (30 an hour), intake replies and rival reviews (150 an hour between them) and web lookups (20 an hour) have their own limits; over those, Pip quietly falls back to templates, the built-in parser, the rules' list of rivals or asking what the brand is. `SOV_CHECKS_PER_HOUR=off` removes all four limits.
 
 ## Deploy to Vercel
 
@@ -143,7 +143,7 @@ The scoring is deliberately simple so you can explain it to your team. It lives 
 - **Rank** is the order in which brands are first named in an answer. Average position only counts answers that mention the brand.
 - **Mention rate** is answers mentioning the brand divided by all answers.
 - **Share of voice** is a brand's mentions divided by all brand mentions, overall or within one assistant's answers.
-- **Rivals** are the competitors you list, plus any brand that appears as a list item in at least two answers.
+- **Rivals** are the competitors you list, plus any brand that leads a list item in at least two answers. Leads that are labels don't count: a list whose items lead into a pick ("**Solana:** Phantom is the usual choice") is a list of situations, and a heading with brands nested under it ("**Solana**" over "**Phantom** – …") is a group. Product lines count as their brand: "Ledger Nano X" and "Ledger Flex" as Ledger when Ledger is found too, and "MetaMask Flask" as MetaMask when you track it. When the check finishes, the intake model looks over the names found, once (`POST /api/brands`): it drops names that aren't rivals in the category (a blockchain in a wallet check, a wallet in a blockchain check, audiences such as "Beginners") and folds product lines the rules missed ("OKX Web3 Wallet" into OKX Wallet). A product line has to start with its brand's name, so the brand's mentions still match it. The review is saved with the run, takes about a second and costs a few hundredths of a cent; without a model, or if it fails, the rules' list stands. Reports saved before this ask for the review the first time they open.
 - **Sources** are the provider's citations plus links written into the answer, with tracking parameters such as `utm_source` removed, deduplicated per answer and grouped by domain. Citations of any of the brand's sites, subdomains included, count as its own.
 - **Sentiment** is a light word list around each mention with negation handling. It's a direction, not a verdict.
 
@@ -161,6 +161,7 @@ src/
     api/intake/brief/        Drafts the brief: identifies the brand, looks it up on the web, reads corrections
     api/intake/route.ts      Reads one step-by-step intake reply with the intake model or the rules
     api/questions/route.ts   Writes the buyer questions for a check (AI writer, then templates)
+    api/brands/route.ts      Checks the rivals found in a check's answers: drops non-rivals, folds product lines
     api/providers/route.ts   Which assistants are live or demo, and today's budget
   components/
     check/                   Chat: composer, messages, plan, live run and summary cards

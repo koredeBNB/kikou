@@ -109,11 +109,16 @@ const isGenericPhrase = (name: string) =>
     .split(/[\s/]+/)
     .every((word) => GENERIC_TERMS.has(word.replace(/[^\p{L}\p{N}&-]/gu, "")));
 
-function candidateFrom(item: string): string | null {
+/** A list item's lead (the bold or colon-ended start) and what follows it. */
+function splitLead(item: string): { raw: string; rest: string; bold: boolean } | null {
   const text = item.replace(MARKDOWN_LINK, "$1");
   const bold = text.match(BOLD_LEAD);
-  const raw = bold ? bold[1] : text.match(PLAIN_LEAD)?.[1];
-  if (!raw) return null;
+  const lead = bold ?? text.match(PLAIN_LEAD);
+  const marked = bold !== null || /^\[[^\]]+\]\(/.test(item);
+  return lead ? { raw: lead[1], rest: text.slice(lead[0].length).replace(/^[\s:–—-]+/, ""), bold: marked } : null;
+}
+
+function nameFrom(raw: string): string | null {
   const name = raw.replace(TRAILING_PUNCTUATION, "").replace(TRAILING_PARENTHETICAL, "").replace(TRAILING_PUNCTUATION, "").trim();
   const words = name.split(/\s+/);
   if (name.length < 2 || name.length > 40 || words.length > 4) return null;
@@ -129,48 +134,179 @@ export interface DiscoverOptions {
   minAnswers?: number;
   /** Lets "Fathom Analytics" count as "Fathom" in a web analytics check. */
   category?: string;
+  /** Tracked brands whose product lines count as them, e.g. "MetaMask Flask" as MetaMask. Defaults to `known`. */
+  tracked?: string[];
+}
+
+/** A brand found in the answers, with the list item it was first seen in. */
+export interface DiscoveredBrand {
+  name: string;
+  answers: number;
+  context: string;
+}
+
+interface ListItem {
+  /** The name the item leads with, when it looks like one. */
+  name: string | null;
+  /** What follows the lead, or the whole item when it has none. */
+  rest: string;
+  hasLead: boolean;
+  /** Bold or linked, as brands in a list usually are; plain leads are often details (“Keyless, no seed phrase”). */
+  bold: boolean;
+  line: string;
+  indent: number;
+  /** Items in one list at one depth share a block. */
+  block: number;
+  children: ListItem[];
+}
+
+function listItems(text: string): ListItem[] {
+  const items: ListItem[] = [];
+  const open: ListItem[] = [];
+  const blocks = new Map<number, number>();
+  let nextBlock = 0;
+  const close = (indent: number, inclusive: boolean) => {
+    while (open.length && (inclusive ? open.at(-1)!.indent >= indent : open.at(-1)!.indent > indent)) open.pop();
+    for (const depth of [...blocks.keys()]) if (inclusive ? depth >= indent : depth > indent) blocks.delete(depth);
+  };
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    const indent = line.match(/^\s*/)![0].replace(/\t/g, "    ").length;
+    const item = line.match(LIST_ITEM)?.[1]?.trim();
+    if (!item) {
+      if (!open.length || indent <= open.at(-1)!.indent) close(indent, true);
+      continue;
+    }
+    close(indent, false);
+    while (open.length && open.at(-1)!.indent >= indent) open.pop();
+    if (!blocks.has(indent)) blocks.set(indent, nextBlock++);
+    const lead = splitLead(item);
+    const entry: ListItem = {
+      name: lead ? nameFrom(lead.raw) : null,
+      rest: lead ? lead.rest : item,
+      hasLead: lead !== null,
+      bold: lead?.bold ?? false,
+      line: item,
+      indent,
+      block: blocks.get(indent)!,
+      children: [],
+    };
+    open.at(-1)?.children.push(entry);
+    open.push(entry);
+    items.push(entry);
+  }
+  return items;
+}
+
+/** What may follow a brand that an item leads into: “Solana: Phantom is the usual choice”, “Backpack or Solflare”. */
+const AFTER_PICK = /^(?:\*\*|__|\])*(?:$|[.,;:()/!?–—]|\s+(?:or|and|is|are|plus|with|for|if|as|via|paired|works|fits|suits|—|–)(?=\s|$)|\s*\(|\s*$)/i;
+
+function leadsWithBrand(item: ListItem, brandKeys: string[]): boolean {
+  const rest = item.rest.replace(/^(?:\*\*|__|\[)+/, "");
+  const text = rest.toLowerCase();
+  const own = item.name?.toLowerCase();
+  return brandKeys.some((key) => key !== own && text.startsWith(key) && AFTER_PICK.test(rest.slice(key.length)));
+}
+
+const startsWithWords = (name: string, prefix: string) => name.toLowerCase().startsWith(`${prefix.toLowerCase()} `);
+
+/**
+ * Leads that are labels, not brands. In a list where items lead into a pick (“**Mostly Solana:** Phantom”),
+ * every lead is a situation. A bare heading over nested brands (“**Solana**” over “**Phantom** – …”) is a group,
+ * unless the brands under it are its own product lines.
+ */
+function labelItems(items: ListItem[], brandKeys: string[]): Set<ListItem> {
+  const picks = new Map<number, number>();
+  for (const item of items) {
+    if (item.hasLead && leadsWithBrand(item, brandKeys)) picks.set(item.block, (picks.get(item.block) ?? 0) + 1);
+  }
+  const isBrand = (name: string | null) => name !== null && brandKeys.includes(name.toLowerCase());
+  const labels = new Set<ListItem>();
+  for (const item of items) {
+    if (!item.name) continue;
+    if ((picks.get(item.block) ?? 0) >= 2) labels.add(item);
+    else if (!item.rest.replace(/[\s:*_]+/g, "")) {
+      const nested = item.children.filter((child) => child.bold && isBrand(child.name));
+      if (nested.length && !nested.some((child) => startsWithWords(child.name!, item.name!))) labels.add(item);
+    }
+  }
+  return labels;
 }
 
 interface Found {
   /** Spellings seen, with the number of answers each first appeared in. */
   names: Map<string, number>;
-  answers: number;
+  answers: Set<number>;
   firstSeen: number;
+  context: string;
 }
 
 const displayName = (names: Map<string, number>) => [...names].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
+const MAX_CONTEXT = 200;
 
-/** Finds likely brand names from list items in answers, excluding brands already tracked. */
-export function discoverBrands(texts: string[], known: string[], options: DiscoverOptions = {}): string[] {
+function collect(answers: ListItem[][], keysOf: (name: string) => string[], knownKeys: Set<string>, labels: (items: ListItem[]) => Set<ListItem>) {
+  const found = new Map<string, Found>();
+  let order = 0;
+  for (const [index, items] of answers.entries()) {
+    const skip = labels(items);
+    for (const item of items) {
+      if (!item.name || skip.has(item)) continue;
+      const keys = keysOf(item.name);
+      if (keys.some((key) => knownKeys.has(key))) continue;
+      const entry = keys.map((key) => found.get(key)).find(Boolean) ?? { names: new Map(), answers: new Set(), firstSeen: order++, context: item.line.slice(0, MAX_CONTEXT) };
+      for (const key of keys) found.set(key, entry);
+      if (entry.answers.has(index)) continue;
+      entry.answers.add(index);
+      entry.names.set(item.name, (entry.names.get(item.name) ?? 0) + 1);
+    }
+  }
+  return [...new Set(found.values())];
+}
+
+/**
+ * Product lines count as their brand: “Ledger Nano X” and “Ledger Flex” as Ledger when Ledger is found too,
+ * and “MetaMask Flask” as MetaMask, which is already tracked.
+ */
+function foldProductLines(entries: Found[], knownNames: string[]): Found[] {
+  const kept: Found[] = [];
+  for (const entry of [...entries].sort((a, b) => displayName(a.names).length - displayName(b.names).length)) {
+    const name = displayName(entry.names);
+    if (knownNames.some((known) => startsWithWords(name, known))) continue;
+    const brand = kept.find((other) => startsWithWords(name, displayName(other.names)));
+    if (!brand) {
+      kept.push(entry);
+      continue;
+    }
+    for (const answer of entry.answers) brand.answers.add(answer);
+    brand.firstSeen = Math.min(brand.firstSeen, entry.firstSeen);
+  }
+  return kept;
+}
+
+/** Finds likely brands from list items in answers, excluding brands already tracked. */
+export function discoverCandidates(texts: string[], known: string[], options: DiscoverOptions = {}): DiscoveredBrand[] {
   const minAnswers = options.minAnswers ?? 2;
   const keysOf = (name: string) => brandAliases(name, options.category).map((n) => n.toLowerCase());
   const knownKeys = new Set(known.flatMap(keysOf));
-  const found = new Map<string, Found>();
-  let order = 0;
-
-  for (const text of texts) {
-    const inThisAnswer = new Set<Found>();
-    for (const line of text.split("\n")) {
-      const item = line.match(LIST_ITEM)?.[1];
-      if (!item) continue;
-      const name = candidateFrom(item.trim());
-      if (!name) continue;
-      const keys = keysOf(name);
-      if (keys.some((key) => knownKeys.has(key))) continue;
-      const entry = keys.map((key) => found.get(key)).find(Boolean) ?? { names: new Map(), answers: 0, firstSeen: order++ };
-      for (const key of keys) found.set(key, entry);
-      if (inThisAnswer.has(entry)) continue;
-      inThisAnswer.add(entry);
-      entry.answers += 1;
-      entry.names.set(name, (entry.names.get(name) ?? 0) + 1);
-    }
-  }
-
+  const answers = texts.map(listItems);
   const prose = texts.map((text) => text.replace(LINKS, " "));
-  return [...new Set(found.values())]
-    .filter((entry) => entry.answers >= minAnswers && !isEverydayWord(displayName(entry.names), entry.answers, prose))
-    .sort((a, b) => b.answers - a.answers || a.firstSeen - b.firstSeen)
-    .map((entry) => displayName(entry.names));
+  const recurring = (entries: Found[]) =>
+    entries.filter((entry) => entry.answers.size >= minAnswers && !isEverydayWord(displayName(entry.names), entry.answers.size, prose));
+
+  const brandKeys = [
+    ...new Set([...knownKeys, ...recurring(collect(answers, keysOf, knownKeys, () => new Set())).flatMap((entry) => [...entry.names.keys()].flatMap(keysOf))]),
+  ].sort((a, b) => b.length - a.length);
+  const found = foldProductLines(
+    collect(answers, keysOf, knownKeys, (items) => labelItems(items, brandKeys)),
+    (options.tracked ?? known).map((name) => name.trim()).filter(Boolean),
+  );
+  return recurring(found)
+    .sort((a, b) => b.answers.size - a.answers.size || a.firstSeen - b.firstSeen)
+    .map((entry) => ({ name: displayName(entry.names), answers: entry.answers.size, context: entry.context }));
+}
+
+export function discoverBrands(texts: string[], known: string[], options: DiscoverOptions = {}): string[] {
+  return discoverCandidates(texts, known, options).map((brand) => brand.name);
 }
 
 const LINKS = /\bhttps?:\/\/\S+|\b[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.[a-z]{2,}\b/gu;

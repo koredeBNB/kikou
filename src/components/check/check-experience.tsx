@@ -55,8 +55,9 @@ import { isAgreement, isRejection, readPlanReply, readSitesReply } from "@/lib/s
 import { planMessage, writingMessage } from "@/lib/sov/plan-copy";
 import { normalizeBrief } from "@/lib/sov/questions";
 import { requestQuestions } from "@/lib/sov/request-questions";
-import { buildReport } from "@/lib/sov/report";
-import { newRunId, saveRun } from "@/lib/sov/storage";
+import { requestBrandReview, type BrandReview } from "@/lib/sov/brand-review";
+import { brandReviewInput, buildReport } from "@/lib/sov/report";
+import { newRunId, saveRun, updateRun, type StoredRun } from "@/lib/sov/storage";
 import { MODEL_IDS, MODEL_LABELS, type Brief, type ModelAnswer, type ModelId, type Question } from "@/lib/sov/types";
 import type { CheckRequest } from "@/lib/sov/events";
 
@@ -88,6 +89,7 @@ interface RunContext {
   brief: Brief;
   questions: Question[];
   models: ModelId[];
+  review?: BrandReview;
 }
 
 type Budget = { limitUsd: number; remainingUsd: number } | null;
@@ -257,7 +259,7 @@ export function CheckExperience() {
         await say({ kind: "text", mood: "idle", text: `Oh dear, the check didn't finish: ${state.failure ?? "no answers came back"}. Want to try again?` });
         return;
       }
-      const saved = saveRun({
+      const stored: StoredRun = {
         id,
         createdAt: new Date().toISOString(),
         brief,
@@ -266,8 +268,18 @@ export function CheckExperience() {
         answers: state.answers,
         errors: state.errors,
         elapsedMs: state.elapsedMs,
-      });
-      const report = buildReport({ brief, questions, answers: state.answers });
+      };
+      const saved = saveRun(stored);
+      setTyping(true);
+      const waited = stopwatch();
+      const reviewInput = brandReviewInput(brief, state.answers);
+      const review = (reviewInput && (await requestBrandReview(reviewInput))) ?? undefined;
+      if (runIdRef.current !== id) return setTyping(false);
+      if (review) {
+        updateRun({ ...stored, brandReview: review });
+        setRunCtx((ctx) => (ctx?.id === id ? { ...ctx, review } : ctx));
+      }
+      const report = buildReport({ brief, questions, answers: state.answers, review });
       const byRate = [...report.modelSummaries].sort((a, b) => b.productMentionRate - a.productMentionRate);
       const best = byRate[0];
       const worst = byRate.at(-1);
@@ -278,16 +290,19 @@ export function CheckExperience() {
       const errorsLine = state.errors.length ? ` (${state.errors.length} answer${state.errors.length === 1 ? "" : "s"} failed, so I left them out.)` : "";
       const savedLine = saved ? "" : " This report is too big to keep in your browser, so it's only here until you close the tab.";
       setStep("done");
-      await say(
-        {
-          kind: "text",
-          mood: "happy",
-          text: `All ${report.totalAnswers} answers are in! **${brief.product}** came up in ${pct(report.product.mentionRate)} of them and ranks ${ordinal(report.productPosition)} for share of voice.${modelLine}${errorsLine}${savedLine}`,
-        },
-        { kind: "summary" },
+      await speak(
+        [
+          {
+            kind: "text",
+            mood: "happy",
+            text: `All ${report.totalAnswers} answers are in! **${brief.product}** came up in ${pct(report.product.mentionRate)} of them and ranks ${ordinal(report.productPosition)} for share of voice.${modelLine}${errorsLine}${savedLine}`,
+          },
+          { kind: "summary" },
+        ],
+        waited(),
       );
     },
-    [say, loadProviders],
+    [say, speak, loadProviders],
   );
 
   const { state: run, start, reset: resetRun } = useCheckRun(onFinish);
@@ -296,7 +311,7 @@ export function CheckExperience() {
   const shownAnswers = useThrottled(run.answers, LIVE_REPORT_MS, run.status !== "running");
   const live = useMemo(() => {
     if (!runCtx || run.status === "idle") return null;
-    return buildReport({ brief: runCtx.brief, questions: runCtx.questions, answers: shownAnswers });
+    return buildReport({ brief: runCtx.brief, questions: runCtx.questions, answers: shownAnswers, review: runCtx.review });
   }, [runCtx, shownAnswers, run.status]);
 
   useEffect(() => {

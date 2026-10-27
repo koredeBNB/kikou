@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AnswerDialog } from "@/components/answer/answer-dialog";
 import { GapsCard, LeaderboardCard, RecommendationsCard, SentimentCard } from "@/components/report/insights";
 import { Methodology } from "@/components/report/methodology";
@@ -12,9 +12,10 @@ import { ReportLoading, ReportNotFound } from "@/components/report/report-states
 import { brandColors, Reveal } from "@/components/report/shared";
 import { SourcesCard } from "@/components/report/sources";
 import { TopicsCard } from "@/components/report/topics";
+import { requestBrandReview, type BrandReview } from "@/lib/sov/brand-review";
 import { buildDemoRun, DEMO_RUN_ID } from "@/lib/sov/demo";
-import { buildReport } from "@/lib/sov/report";
-import { runKey, unsavedRun, type StoredRun } from "@/lib/sov/storage";
+import { brandReviewInput, buildReport } from "@/lib/sov/report";
+import { runKey, unsavedRun, updateRun, type StoredRun } from "@/lib/sov/storage";
 import { buildTopicBreakdown } from "@/lib/sov/topics";
 import type { AnalyzedAnswer } from "@/lib/sov/types";
 
@@ -52,8 +53,44 @@ export function ReportView({ id }: { id: string }) {
   return <Dashboard run={run} />;
 }
 
+const reviews = new Map<string, Promise<BrandReview | null>>();
+
+/** One request per run in this tab, however often its report mounts; a review that comes back is kept with the run. */
+function reviewFor(run: StoredRun): Promise<BrandReview | null> {
+  let review = reviews.get(run.id);
+  if (!review) {
+    const input = brandReviewInput(run.brief, run.answers);
+    review = input
+      ? requestBrandReview(input).then((result) => {
+          if (result) updateRun({ ...run, brandReview: result });
+          return result;
+        })
+      : Promise.resolve(null);
+    reviews.set(run.id, review);
+  }
+  return review;
+}
+
+/** Runs saved before the model checked their rivals ask for that check when their report first opens. */
+function useBrandReview(run: StoredRun): BrandReview | undefined {
+  const [fetched, setFetched] = useState<{ id: string; review: BrandReview } | null>(null);
+  const needed = !run.brandReview && run.id !== DEMO_RUN_ID;
+  useEffect(() => {
+    if (!needed) return;
+    let current = true;
+    void reviewFor(run).then((review) => {
+      if (review && current) setFetched({ id: run.id, review });
+    });
+    return () => {
+      current = false;
+    };
+  }, [needed, run]);
+  return run.brandReview ?? (fetched?.id === run.id ? fetched.review : undefined);
+}
+
 function Dashboard({ run }: { run: StoredRun }) {
-  const report = useMemo(() => buildReport({ brief: run.brief, questions: run.questions, answers: run.answers }), [run]);
+  const review = useBrandReview(run);
+  const report = useMemo(() => buildReport({ brief: run.brief, questions: run.questions, answers: run.answers, review }), [run, review]);
   const topics = useMemo(() => buildTopicBreakdown(run, report), [run, report]);
   const colors = useMemo(() => brandColors(report), [report]);
   const [open, setOpen] = useState<AnalyzedAnswer | null>(null);

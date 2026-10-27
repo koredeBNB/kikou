@@ -33,7 +33,7 @@ const ITEMS = [
   },
   {
     q: "Where do the rivals come from?",
-    a: "Competitors you listed are always tracked. Any other brand that appears as a list item in at least two answers is added automatically, so you can spot rivals you didn't know about.",
+    a: "Competitors you listed are always tracked. Any other brand that leads a list item in at least two answers is added automatically, so you can spot rivals you didn't know about. A small AI model then drops names that aren't rivals in your category (like a blockchain in a wallet check) and counts product lines as their brand, so “Ledger Nano X” counts as Ledger.",
   },
   {
     q: "Which sources are counted?",

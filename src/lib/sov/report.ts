@@ -1,5 +1,6 @@
+import { applyBrandReview, MAX_REVIEWED, type BrandReview, type BrandReviewInput } from "@/lib/sov/brand-review";
 import { collectCitations, coveredBy, ownDomains } from "@/lib/sov/citations";
-import { discoverBrands } from "@/lib/sov/discover";
+import { discoverCandidates } from "@/lib/sov/discover";
 import { findMentions } from "@/lib/sov/mentions";
 import { buildRecommendations } from "@/lib/sov/recommendations";
 import {
@@ -68,14 +69,35 @@ export interface BuildReportInput {
   answers: ModelAnswer[];
   /** How many answers an untracked brand must appear in to be counted. */
   discoverMinAnswers?: number;
+  /** The model's check of the brands found, which drops non-rivals and folds product lines into their brand. */
+  review?: BrandReview;
 }
 
-export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 }: BuildReportInput): Report {
+function discoverRivals(brief: Brief, answers: ModelAnswer[], minAnswers: number) {
   const { product, competitors } = trackedBrands(brief);
-  const discovered = discoverBrands(
+  return discoverCandidates(
     answers.map((a) => a.text),
     [product, ...competitors, ...(brief.topics ?? [])],
-    { minAnswers: discoverMinAnswers, category: brief.category },
+    { minAnswers, category: brief.category, tracked: [product, ...competitors] },
+  );
+}
+
+/** What to ask the model about the brands found in a check's answers, or null when there are none. */
+export function brandReviewInput(brief: Brief, answers: ModelAnswer[]): BrandReviewInput | null {
+  const { product, competitors } = trackedBrands(brief);
+  const candidates = discoverRivals(brief, answers, 2)
+    .slice(0, MAX_REVIEWED)
+    .map(({ name, context }) => ({ name, context }));
+  const category = brief.category.trim();
+  return product && category && candidates.length ? { product, category, competitors, candidates } : null;
+}
+
+export function buildReport({ brief, questions, answers, discoverMinAnswers = 2, review }: BuildReportInput): Report {
+  const { product, competitors } = trackedBrands(brief);
+  const discovered = applyBrandReview(
+    discoverRivals(brief, answers, discoverMinAnswers).map((brand) => brand.name),
+    review,
+    [product, ...competitors],
   );
   const allBrands = [product, ...competitors, ...discovered];
   const questionText = new Map(questions.map((q) => [q.id, q.text]));
