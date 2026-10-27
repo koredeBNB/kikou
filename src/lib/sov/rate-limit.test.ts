@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { hourlyLimit, rateLimit, visitorId } from "@/lib/sov/rate-limit";
+import { hourlyLimit, rateLimit, siteAuditLimit, visitorId } from "@/lib/sov/rate-limit";
 import { createMemoryStore } from "@/lib/store/memory";
 import type { CheckStore } from "@/lib/store/types";
 
@@ -11,10 +11,11 @@ describe("hourlyLimit", () => {
     expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "30" }, "questions")).toBe(30);
     expect(hourlyLimit({}, "intake")).toBe(150);
     expect(hourlyLimit({}, "lookup")).toBe(20);
+    expect(hourlyLimit({}, "audit")).toBe(20);
   });
 
   it("can be switched off for everything", () => {
-    for (const bucket of ["check", "questions", "intake", "lookup"] as const) expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "off" }, bucket)).toBeNull();
+    for (const bucket of ["check", "questions", "intake", "lookup", "audit"] as const) expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "off" }, bucket)).toBeNull();
   });
 });
 
@@ -46,5 +47,36 @@ describe("rateLimit", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const broken = { hit: async () => Promise.reject(new Error("down")) } as unknown as CheckStore;
     expect(await rateLimit({}, broken, "check", headers)).toBeNull();
+  });
+
+  it("says how many site audits a visitor has used", async () => {
+    const store = createMemoryStore();
+    const now = Date.now();
+    for (let i = 0; i < 20; i++) expect(await rateLimit({}, store, "audit", headers, now)).toBeNull();
+    expect(await rateLimit({}, store, "audit", headers, now + 30 * 60_000)).toEqual({
+      retryAfterSeconds: 30 * 60,
+      message: "That's 20 site audits from here in the last hour. Try again in about 30 minutes.",
+    });
+  });
+});
+
+describe("siteAuditLimit", () => {
+  it("allows 30 audits of one site an hour from everyone together", async () => {
+    const store = createMemoryStore();
+    const now = Date.now();
+    for (let i = 0; i < 30; i++) expect(await siteAuditLimit({}, store, "thimble.studio", now)).toBeNull();
+    expect(await siteAuditLimit({}, store, "other.example", now)).toBeNull();
+    expect(await siteAuditLimit({}, store, "thimble.studio", now + 59 * 60_000)).toEqual({
+      retryAfterSeconds: 60,
+      message: "Kioku has already checked thimble.studio 30 times in the last hour, so it's giving the site a rest. Try again in about a minute.",
+    });
+  });
+
+  it("is switched off with the other limits and lets audits through when the store is down", async () => {
+    const store = createMemoryStore();
+    for (let i = 0; i < 40; i++) expect(await siteAuditLimit({ SOV_CHECKS_PER_HOUR: "off" }, store, "thimble.studio")).toBeNull();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = { hit: async () => Promise.reject(new Error("down")) } as unknown as CheckStore;
+    expect(await siteAuditLimit({}, broken, "thimble.studio")).toBeNull();
   });
 });

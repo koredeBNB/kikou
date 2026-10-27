@@ -2,6 +2,7 @@
 
 import {
   AiChat02Icon,
+  AiScanIcon,
   BubbleChatQuestionIcon,
   DashboardSquare01Icon,
   Globe02Icon,
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { id: "rankings", label: "Leaderboard", icon: RankingIcon },
   { id: "assistants", label: "Assistants", icon: AiChat02Icon },
   { id: "sources", label: "Sources", icon: Globe02Icon },
+  { id: "readability", label: "AI readability", icon: AiScanIcon },
   { id: "prompts", label: "Prompts", icon: BubbleChatQuestionIcon },
   { id: "method", label: "How it works", icon: InformationCircleIcon },
 ];

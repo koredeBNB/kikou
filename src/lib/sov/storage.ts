@@ -1,3 +1,4 @@
+import type { SiteAudit } from "@/lib/audit/types";
 import type { ProviderStatus } from "@/lib/providers/config";
 import type { BrandReview } from "@/lib/sov/brand-review";
 import type { Brief, ModelAnswer, ModelId, Question } from "@/lib/sov/types";
@@ -19,6 +20,8 @@ export interface StoredRun {
   elapsedMs: number;
   /** Runs saved before the model checked their rivals get this when their report is first opened. */
   brandReview?: BrandReview;
+  /** The latest AI readability audit of the brief's website. */
+  audit?: SiteAudit;
 }
 
 // The keys predate the rename to Kioku; changing them would orphan every saved report.
