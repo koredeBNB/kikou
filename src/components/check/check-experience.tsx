@@ -330,6 +330,7 @@ export function CheckExperience() {
     const { turn } = await requestIntake({ field, reply: text, state });
     const { state: nextState, next, messages: lines } = applyTurn(state, field, turn);
     setIntake(nextState);
+    if (proposed) setProposed({ ...proposed, ...toBrief(nextState) });
     await speak(
       lines.map((line) => ({ kind: "text" as const, ...line })),
       elapsed(),

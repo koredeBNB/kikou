@@ -29,7 +29,16 @@ export function BriefCard({ brief }: { brief: BriefDraft }) {
           </Badge>
         </Row>
         <Row label="For">{brief.audience || <Empty>Everyone</Empty>}</Row>
-        <Row label="Website">{brief.website || <Empty>None</Empty>}</Row>
+        <Row label="Website">
+          {brief.website ? (
+            <>
+              {brief.website}
+              <span className="block text-xs text-ink-soft">Citations of this site count as yours</span>
+            </>
+          ) : (
+            <Empty>None yet. I&apos;ll ask, since it&apos;s how I spot your citations</Empty>
+          )}
+        </Row>
         <Row label="Focus areas">
           {topics.length ? (
             <span className="flex flex-wrap gap-1.5">

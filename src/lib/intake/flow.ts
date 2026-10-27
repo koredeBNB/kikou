@@ -56,9 +56,12 @@ export function draftIntake(brief: Brief, count?: number): IntakeState {
   };
 }
 
-/** Once the user confirms the draft, its empty fields stay empty: only the question count may still be asked. */
+/**
+ * Once the user confirms the draft, its empty fields stay empty, except the website and the question count,
+ * which Pip still asks for: the website is what citations of the user's own site are counted against.
+ */
 export function acceptDraft(state: IntakeState): { state: IntakeState; next: IntakeNext } {
-  const skipped = OPTIONAL_FIELDS.filter((field) => field !== "count" && !filled(state, field));
+  const skipped = OPTIONAL_FIELDS.filter((field) => field !== "count" && field !== "website" && !filled(state, field));
   const next: IntakeState = { ...state, skipped: [...new Set([...state.skipped, ...skipped])] };
   return { state: next, next: nextField(next) };
 }
@@ -112,7 +115,7 @@ export function questionFor(field: IntakeField, state: IntakeState): string {
     case "competitors":
       return "Which competitors should I keep an eye on? List a few, separated by commas, or skip and I'll spot them in the answers.";
     case "website":
-      return "What's your website? It helps me notice when assistants cite you. No site yet? Just skip.";
+      return "What's your website? It's how I tell when assistants cite you, so it's worth adding. No site yet? Just skip.";
     case "topics":
       return `What should I focus on? Name up to five areas, like ${quoted(topicExamples(state.category))}, and I'll split the questions across them. Or skip for a broad check.`;
     case "count":
@@ -141,6 +144,7 @@ export const BRIEF_COPY = {
   changed: "Done. Here's the updated brief. Anything else to change?",
   failed: "Sorry, I couldn't update the brief just now. Try again, or say it looks right to carry on.",
   accepted: "Great, that's the brief sorted.",
+  nearly: "Great, nearly there.",
   planUnclear:
     "I can add a buyer question or change the brief. Try “Which wallet has the lowest fees?” or “add Base as a rival”, or press **Ask** on the plan to start.",
   planAccepted: "Lovely. Press **Ask** on the plan whenever you're ready, or say “go”.",
@@ -150,7 +154,8 @@ export const BRIEF_COPY = {
 
 /** What Pip says once the brief is confirmed, ending with the next question if there is one. */
 export function acceptedLine(state: IntakeState, next: IntakeNext): string {
-  return next === "review" ? BRIEF_COPY.accepted : `${BRIEF_COPY.accepted} ${questionFor(next, state)}`;
+  if (next === "review") return BRIEF_COPY.accepted;
+  return `${next === "website" ? BRIEF_COPY.nearly : BRIEF_COPY.accepted} ${questionFor(next, state)}`;
 }
 
 const SKIP_REQUIRED: Record<"product" | "category", string> = {

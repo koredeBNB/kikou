@@ -268,20 +268,40 @@ describe("toBrief", () => {
 describe("drafted briefs", () => {
   const drafted = { product: "BNB Chain", category: "layer 1 blockchain", audience: "", competitors: ["Ethereum"], topics: ["RWA", "AI"] };
 
-  it("fills the intake from the draft, then asks only for the count once it's confirmed", () => {
+  it("fills the intake from the draft, then asks only for the website and count once it's confirmed", () => {
     const state = draftIntake(drafted);
     expect(state).toMatchObject({ product: "BNB Chain", category: "layer 1 blockchain", competitors: ["Ethereum"], topics: ["RWA", "AI"], skipped: [] });
     const accepted = acceptDraft(state);
+    expect(accepted.next).toBe("website");
+    expect(accepted.state.skipped).toEqual(["audience"]);
+    expect(acceptedLine(accepted.state, accepted.next)).toBe(`Great, nearly there. ${questionFor("website", accepted.state)}`);
+    expect(questionFor("website", accepted.state)).toMatch(/cite you/);
+
+    const answered = applyTurn(accepted.state, "website", { intent: "answer", values: { website: "bnbchain.org" } });
+    expect(answered.next).toBe("count");
+    expect(answered.state.website).toBe("bnbchain.org");
+    expect(applyTurn(accepted.state, "website", { intent: "skip", values: {} }).next).toBe("count");
+  });
+
+  it("asks only for the count when the draft has a website", () => {
+    const accepted = acceptDraft(draftIntake({ ...drafted, website: "bnbchain.org" }));
     expect(accepted.next).toBe("count");
-    expect(accepted.state.skipped).toEqual(["audience", "website"]);
+    expect(accepted.state.skipped).toEqual(["audience"]);
     expect(acceptedLine(accepted.state, accepted.next)).toBe(`Great, that's the brief sorted. ${questionFor("count", accepted.state)}`);
   });
 
-  it("goes straight to the plan when the user already said how many questions", () => {
-    const accepted = acceptDraft(draftIntake(drafted, 25));
+  it("goes straight to the plan when the draft has a website and the user already said how many questions", () => {
+    const withSite = { ...drafted, website: "bnbchain.org" };
+    const accepted = acceptDraft(draftIntake(withSite, 25));
     expect(accepted.next).toBe("review");
     expect(acceptedLine(accepted.state, accepted.next)).toBe("Great, that's the brief sorted.");
-    expect(toBrief(accepted.state)).toEqual({ ...drafted, website: undefined });
+    expect(toBrief(accepted.state)).toEqual(withSite);
+  });
+
+  it("still asks for a missing website when the user already said how many questions", () => {
+    const accepted = acceptDraft(draftIntake(drafted, 25));
+    expect(accepted.next).toBe("website");
+    expect(applyTurn(accepted.state, "website", { intent: "skip", values: {} }).next).toBe("review");
   });
 
   it("introduces the draft by what the brand is, or by what the user said when Pip didn't know it", () => {
