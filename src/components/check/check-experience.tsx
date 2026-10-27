@@ -27,7 +27,7 @@ import { useCheckRun, type RunState } from "@/hooks/use-check-run";
 import { useThrottled } from "@/hooks/use-throttled";
 import { ordinal, pct } from "@/lib/format";
 import type { ProviderStatus } from "@/lib/providers/config";
-import { MAX_EARLIER, sameBrief, type BriefDraft, type Identified } from "@/lib/intake/brief";
+import { MAX_EARLIER, sameBrief, type BriefDraft, type BriefStage, type Identified, type LookupInput } from "@/lib/intake/brief";
 import {
   acceptDraft,
   acceptedLine,
@@ -36,21 +36,29 @@ import {
   BRIEF_COPY,
   draftIntake,
   draftLine,
+  draftResearch,
   emptyIntake,
-  lookingUpLine,
+  NO_RESEARCH,
   questionCount,
+  replyResearch,
+  researched,
+  researchedLine,
+  researchFailedLine,
+  researchLine,
   settleSites,
   SITES_COPY,
   toBrief,
   topicExamples,
   unknownLine,
+  type Research,
+  type ResearchPlan,
 } from "@/lib/intake/flow";
 import { requestIdentify, requestIntake, requestLookup, requestRevision } from "@/lib/intake/request";
 import { INTAKE_FIELDS, type IntakeField, type IntakeState } from "@/lib/intake/types";
 import { budgetNote } from "@/lib/sov/budget";
 import { canSwitchSearch, estimateFor, estimateLine } from "@/lib/sov/estimate";
 import { classifyIntent, MAX_QUESTIONS } from "@/lib/sov/generate";
-import { ownDomains } from "@/lib/sov/citations";
+import { ownDomains, siteFields } from "@/lib/sov/citations";
 import { isAgreement, isRejection, readPlanReply, readSitesReply } from "@/lib/sov/intake";
 import { planMessage, writingMessage } from "@/lib/sov/plan-copy";
 import { normalizeBrief } from "@/lib/sov/questions";
@@ -178,6 +186,7 @@ export function CheckExperience() {
   const [draft, setDraft] = useState<Brief>(EMPTY_BRIEF);
   const [intake, setIntake] = useState<IntakeState>(emptyIntake);
   const [brand, setBrand] = useState<BrandSearch>(NEW_SEARCH);
+  const [research, setResearch] = useState<Research>(NO_RESEARCH);
   const [proposed, setProposed] = useState<BriefDraft | null>(null);
   const [planned, setPlanned] = useState<PlannedQuestion[]>([]);
   const [models, setModels] = useState(ALL_MODELS);
@@ -373,14 +382,69 @@ export function CheckExperience() {
     setStep("confirm");
   };
 
+  /** Says what Pip is about to look up, then reads the brand's sites and searches the web. */
+  const lookUp = async (name: string, plan: ResearchPlan, input: LookupInput, waited: number) => {
+    await speak([{ kind: "text", mood: "thinking", text: researchLine(name, plan) }], waited);
+    setTyping(true);
+    const elapsed = stopwatch();
+    const found = await requestLookup({
+      ...input,
+      name,
+      ...(plan.sites.length ? { sites: plan.sites } : {}),
+      ...(plan.rejected.length ? { rejected: plan.rejected } : {}),
+    });
+    return { found, waited: elapsed() };
+  };
+
+  /**
+   * Looks the brand up again after a reply about its brief. Returns the brief it found, or null once Pip has
+   * said it found nothing. A lookup for rivals keeps the brief's sites, since the user only turned down the rivals.
+   */
+  const researchReply = async (text: string, brief: BriefDraft, plan: ResearchPlan, stage: BriefStage) => {
+    const { found, waited } = await lookUp(brief.product, plan, { reply: text, earlier: [], brief }, 0);
+    const draft = found?.kind === "draft" ? found : null;
+    setResearch(researched(research, plan.sites, draft !== null));
+    if (!draft) {
+      await speak([{ kind: "text", text: researchFailedLine(brief.product, plan) }], waited);
+      return null;
+    }
+    const next = plan.why === "rivals" ? { ...draft.brief, ...siteFields([...ownDomains(brief), ...ownDomains(draft.brief)]) } : draft.brief;
+    const line = plan.why === "rivals" || stage === "plan" ? researchedLine(next, plan, stage) : (draft.message ?? researchedLine(next, plan, stage));
+    return { brief: next, text: line, count: draft.count, waited };
+  };
+
+  /** Shows a brief Pip looked up for the user to check, back on the confirm step. */
+  const showResearched = async (found: { brief: BriefDraft; text: string; count?: number; waited: number }) => {
+    const count = found.count ?? intake.count;
+    setProposed(found.brief);
+    setIntake(draftIntake(found.brief, count));
+    await speak([{ kind: "text", mood: "happy", text: found.text }, { kind: "brief", brief: found.brief }], found.waited);
+    setStep("confirm");
+  };
+
   const settleBrand = async (
     result: Identified,
     text: string,
     search: BrandSearch,
-    { web, canLookUp, waited }: { web: boolean; canLookUp: boolean; waited: number },
+    { web, waited, research: current }: { web: boolean; waited: number; research: Research },
   ): Promise<void> => {
+    const words = [...search.earlier, text].join("\n");
     if (result.kind === "draft") {
-      return showDraft(result.brief, result.message ?? draftLine(result.brief, { known: result.known, web }), result.count ?? search.count, waited);
+      const count = result.count ?? search.count;
+      const plan = web ? null : draftResearch(words, current, result);
+      if (plan && (plan.sites.length > 0 || !search.lookedUp)) {
+        const name = result.brief.product;
+        const looked = await lookUp(name, plan, { reply: text, earlier: search.earlier, brief: result.brief }, waited);
+        const found = looked.found?.kind === "draft" ? looked.found : null;
+        setResearch(researched({ ...current, known: result.known }, plan.sites, found !== null));
+        if (found) return showDraft(found.brief, found.message ?? researchedLine(found.brief, plan), found.count ?? count, looked.waited);
+        const fallback = result.known
+          ? `${researchFailedLine(name, plan)} ${result.message ?? draftLine(result.brief, { known: true })}`
+          : draftLine(result.brief, { known: false, searched: true });
+        return showDraft(result.brief, fallback, count, looked.waited);
+      }
+      setResearch({ ...current, known: current.known || result.known });
+      return showDraft(result.brief, result.message ?? draftLine(result.brief, { known: result.known, web }), count, waited);
     }
     const followUp = search.earlier.length > 0 && !web;
     const next: BrandSearch = {
@@ -398,15 +462,15 @@ export function CheckExperience() {
       return;
     }
     if (followUp) return resumeRules(text, next);
-    if (canLookUp && !search.lookedUp) {
-      await speak([{ kind: "text", mood: "thinking", text: lookingUpLine(result.name) }], waited);
-      setTyping(true);
-      const elapsed = stopwatch();
-      const found = await requestLookup({ reply: text, earlier: search.earlier });
-      const looked = { ...next, lookedUp: true };
-      if (found) return settleBrand(found, text, looked, { web: true, canLookUp: false, waited: elapsed() });
-      setBrand(looked);
-      await speak([{ kind: "text", text: unknownLine(result.name, true) }], elapsed());
+    const plan = web || search.lookedUp ? null : draftResearch(words, current);
+    if (plan) {
+      const looked = await lookUp(result.name, plan, { reply: text, earlier: search.earlier }, waited);
+      const after = researched(current, plan.sites, looked.found?.kind === "draft");
+      setResearch(after);
+      const lookedUp = { ...next, lookedUp: true };
+      if (looked.found) return settleBrand(looked.found, text, lookedUp, { web: true, waited: looked.waited, research: after });
+      setBrand(lookedUp);
+      await speak([{ kind: "text", text: unknownLine(result.name, true) }], looked.waited);
       return;
     }
     setBrand(next);
@@ -414,7 +478,7 @@ export function CheckExperience() {
   };
 
   /** Works out which brand the user means and drafts its brief; without a model, falls back to step-by-step questions. */
-  const handleProduct = async (text: string, search: BrandSearch) => {
+  const handleProduct = async (text: string, search: BrandSearch, current: Research) => {
     setTyping(true);
     const elapsed = stopwatch();
     const { identified, lookup } = await requestIdentify({ reply: text, earlier: search.earlier });
@@ -422,7 +486,7 @@ export function CheckExperience() {
       setTyping(false);
       return resumeRules(text, search);
     }
-    await settleBrand(identified, text, search, { web: false, canLookUp: lookup, waited: elapsed() });
+    await settleBrand(identified, text, search, { web: false, waited: elapsed(), research: { ...current, available: lookup } });
   };
 
   const acceptBrief = async (brief: BriefDraft, count: number | undefined, waited = 0) => {
@@ -437,6 +501,9 @@ export function CheckExperience() {
   const handleConfirm = async (text: string, brief: BriefDraft) => {
     if (isAgreement(text)) return acceptBrief(brief, intake.count);
     if (isRejection(text)) return say({ kind: "text", text: BRIEF_COPY.rejected });
+    const plan = replyResearch(text, research, brief);
+    const found = plan && (await researchReply(text, brief, plan, "confirm"));
+    if (found) return showResearched(found);
     setTyping(true);
     const elapsed = stopwatch();
     const revision = await requestRevision({ reply: text, brief, stage: "confirm" });
@@ -472,6 +539,9 @@ export function CheckExperience() {
     const rules = readSitesReply(text, ownDomains(brief));
     if (rules.kind === "keep") return settleSitesStep(brief, "keep");
     if (rules.kind === "none") return settleSitesStep(brief, []);
+    const plan = replyResearch(text, research, brief, "sites");
+    const found = plan && (await researchReply(text, brief, plan, "sites"));
+    if (found) return showResearched(found);
     setTyping(true);
     const elapsed = stopwatch();
     const revision = await requestRevision({ reply: text, brief, stage: "sites" });
@@ -528,9 +598,12 @@ export function CheckExperience() {
       await say({ kind: "text", text: "No worries. Press **Ask** on the plan whenever you're ready." });
       return;
     }
+    const brief = proposed ?? draft;
+    const plan = replyResearch(text, research, brief, "plan");
+    const found = plan && (await researchReply(text, brief, plan, "plan"));
+    if (found) return replan(found.brief, found.count ?? questionCount(intake), found.text, found.waited);
     setTyping(true);
     const elapsed = stopwatch();
-    const brief = proposed ?? draft;
     const revision = await requestRevision({ reply: text, brief, stage: "plan" });
     const waited = elapsed();
     if (!revision) {
@@ -564,6 +637,7 @@ export function CheckExperience() {
     setDraft(EMPTY_BRIEF);
     setIntake(emptyIntake());
     setBrand(NEW_SEARCH);
+    setResearch(NO_RESEARCH);
     setProposed(null);
     setPlanned([]);
     setModels(ALL_MODELS);
@@ -585,12 +659,13 @@ export function CheckExperience() {
       setStep("product");
       setIntake(emptyIntake());
       setBrand(NEW_SEARCH);
+      setResearch(NO_RESEARCH);
       setProposed(null);
-      await handleProduct(text, NEW_SEARCH);
+      await handleProduct(text, NEW_SEARCH, NO_RESEARCH);
       return;
     }
     append({ id: uid(), role: "user", text });
-    if (step === "product") return handleProduct(text, brand);
+    if (step === "product") return handleProduct(text, brand, research);
     if (step === "website" && proposed) return handleSites(text, proposed);
     if (isIntakeStep(step)) return handleIntake(step, text, intake);
     if (step === "confirm" && proposed) return handleConfirm(text, proposed);

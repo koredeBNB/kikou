@@ -54,5 +54,5 @@ export async function POST(request: Request) {
   if (call.costUsd) {
     await store.charge(utcDay(new Date()), call.costUsd, Date.now()).catch((error: unknown) => console.error("Booking a lookup's cost failed", error));
   }
-  return Response.json(call.ok ? { source: "ai", output: call.output } : { source: "rules", reason: call.reason }, { headers });
+  return Response.json(call.ok ? { source: "ai", output: call.output, read: call.read } : { source: "rules", reason: call.reason }, { headers });
 }

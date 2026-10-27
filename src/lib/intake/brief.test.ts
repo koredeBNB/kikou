@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildIdentifyPrompt,
+  buildLookupPrompt,
   buildRevisePrompt,
   IDENTIFY_SYSTEM_PROMPT,
   LOOKUP_SYSTEM_PROMPT,
   parseIdentified,
+  parseLookup,
   parseRevision,
   sameBrief,
   type BriefDraft,
@@ -164,24 +166,94 @@ describe("parseIdentified", () => {
     expect(parseIdentified(known({ name: "BNB Chain" }), { reply: "bnb", earlier: [] })).toMatchObject({ kind: "draft", known: true });
   });
 
-  it("needs a web lookup to find exactly the name the user wrote", () => {
-    const lookup = known({ name: "Vexoria Labs", description: "a security firm", category: "security software", websites: ["vexoria.io"], topics: [] });
-    expect(parseIdentified(lookup, { reply: "Vexorial Labs", earlier: [] }, true)).toBeNull();
-    expect(parseIdentified({ ...lookup, name: "VexorialLabs" }, { reply: "vexorial labs", earlier: [] }, true)).toBeNull();
-    expect(parseIdentified({ ...lookup, name: "Vexorial Labs" }, { reply: "vexorial labs", earlier: [] }, true)).toMatchObject({
-      kind: "draft",
-      known: true,
-      brief: { product: "Vexorial Labs", category: "security software", website: "vexoria.io" },
-    });
-    expect(parseIdentified(unknownOutput({ name: "Vexorial Labs" }), { reply: "Vexorial Labs", earlier: [] }, true)).toMatchObject({ kind: "unknown" });
-  });
-
   it.each([
     ["not JSON", "nope"],
     ["an unknown recognized value", known({ recognized: "maybe" })],
     ["a sentence for a name", known({ name: "I think it is the blockchain one" })],
   ])("returns null for %s", (_label, output) => {
     expect(parseIdentified(output, { reply: BNB_REPLY, earlier: [] })).toBeNull();
+  });
+});
+
+describe("parseLookup", () => {
+  const FOMO_DRAFT: BriefDraft = {
+    product: "fomo",
+    category: "social trading app",
+    audience: "crypto traders",
+    website: "fomo.family",
+    competitors: ["eToro", "Public", "Robinhood", "ZuluTrade"],
+    topics: ["social trading", "crypto copy trading"],
+  };
+  const input = { reply: "wrong rivals", earlier: ["fomo the social trading app"], name: "fomo", sites: ["fomo.family"], brief: FOMO_DRAFT };
+  const found = (patch: Record<string, unknown> = {}) => ({
+    recognized: "yes",
+    name: "fomo",
+    description: "the social-first app for trading memecoins and copying top traders",
+    category: "crypto trading app",
+    websites: ["fomo.xyz"],
+    audience: "crypto traders",
+    competitors: ["Moonshot", "fomo", "Photon", "Axiom", "BullX", "GMGN", "Pump.fun"],
+    topics: [],
+    alternatives: [],
+    count: null,
+    message: "I read fomo.family and looked around the web. Is it **fomo**, the social-first app for trading memecoins?",
+    ...patch,
+  });
+
+  it("drafts from the brand's homepage and the web, keeping the user's sites first and the brief's focus areas", () => {
+    expect(parseLookup(found(), input, ["fomo.family"])).toEqual({
+      kind: "draft",
+      known: true,
+      brief: {
+        product: "fomo",
+        description: "the social-first app for trading memecoins and copying top traders",
+        category: "crypto trading app",
+        audience: "crypto traders",
+        website: "fomo.family",
+        otherSites: ["fomo.xyz"],
+        competitors: ["Moonshot", "Photon", "Axiom", "BullX", "GMGN"],
+        topics: ["social trading", "crypto copy trading"],
+      },
+      message: "I read fomo.family and looked around the web. Is it **fomo**, the social-first app for trading memecoins?",
+    });
+  });
+
+  it("never brings back rivals the user turned down", () => {
+    const result = parseLookup(found(), { ...input, rejected: ["moonshot", "Photon"] }, ["fomo.family"]);
+    expect(result).toMatchObject({ kind: "draft", brief: { competitors: ["Axiom", "BullX", "GMGN", "Pump.fun"] } });
+  });
+
+  it("keeps the brief's audience when the lookup doesn't give one", () => {
+    expect(parseLookup(found({ audience: null }), input, ["fomo.family"])).toMatchObject({ brief: { audience: "crypto traders" } });
+  });
+
+  it("takes focus areas from the user's own words when there's no brief yet", () => {
+    const first = { reply: "fomo, mostly copy trading", earlier: [], name: "fomo", sites: [] };
+    expect(parseLookup(found({ topics: ["copy trading"] }), first, [])).toMatchObject({ kind: "draft", brief: { topics: ["copy trading"], website: "fomo.xyz" } });
+  });
+
+  it("needs exactly the name the user wrote, unless the brand's own site was read", () => {
+    const vexoria = found({ name: "Vexoria Labs", description: "a security firm", category: "security software", websites: ["vexoria.io"] });
+    const typed = { reply: "Vexorial Labs", earlier: [], name: "Vexorial Labs", sites: [] };
+    expect(parseLookup(vexoria, typed, [])).toBeNull();
+    expect(parseLookup({ ...vexoria, name: "VexorialLabs" }, { ...typed, reply: "vexorial labs" }, [])).toBeNull();
+    expect(parseLookup({ ...vexoria, name: "Vexorial Labs" }, { ...typed, reply: "vexorial labs" }, [])).toMatchObject({ kind: "draft", brief: { product: "Vexorial Labs" } });
+    expect(parseLookup(vexoria, { ...typed, sites: ["vexoria.io"] }, ["vexoria.io"])).toMatchObject({ kind: "draft", brief: { product: "Vexoria Labs", website: "vexoria.io" } });
+  });
+
+  it("reads a bare domain as the brand's name", () => {
+    expect(parseLookup(found(), { reply: "https://fomo.family/?r=FunnyDirtyBee", earlier: [], sites: ["fomo.family"] }, [])).toMatchObject({ kind: "draft", brief: { product: "fomo" } });
+  });
+
+  it("says when the lookup couldn't tell what the brand is, or found several", () => {
+    expect(parseLookup(found({ recognized: "no", topics: ["copy trading"] }), { ...input, reply: "fomo, copy trading" }, [])).toEqual({ kind: "unknown", name: "fomo", topics: ["copy trading"] });
+    const several = found({ recognized: "ambiguous", alternatives: ["fomo, the crypto trading app", "FOMO, the gym chain"] });
+    expect(parseLookup(several, input, [])).toMatchObject({ kind: "ambiguous", options: ["fomo, the crypto trading app", "FOMO, the gym chain"] });
+  });
+
+  it("returns null for output that doesn't fit the schema", () => {
+    expect(parseLookup("nope", input, [])).toBeNull();
+    expect(parseLookup(found({ recognized: "maybe" }), input, [])).toBeNull();
   });
 });
 
@@ -263,7 +335,6 @@ describe("prompts", () => {
     const data = JSON.parse(user);
     expect(data.reply).toHaveLength(500);
     expect(data.earlier).toEqual(["two", "three"]);
-    expect(buildIdentifyPrompt({ reply: "Attio", earlier: [] }, true).system).toBe(LOOKUP_SYSTEM_PROMPT);
   });
 
   it("sends the whole brief and the stage for a revision, with empty fields as null", () => {
@@ -275,6 +346,33 @@ describe("prompts", () => {
     });
     const withSites = buildRevisePrompt({ reply: "that's all", brief: { ...BNB, otherSites: ["bnb.org", "docs.bnbchain.org"] }, stage: "sites" });
     expect(JSON.parse(withSites.user)).toMatchObject({ brief: { websites: ["bnbchain.org", "bnb.org"] }, stage: "sites" });
+  });
+
+  it("searches the web with a short query, and sends the user's words, the brief and the homepage as data beside it", () => {
+    const homepage = {
+      site: "fomo.family",
+      url: "https://fomo.family/",
+      title: "fomo | Social Crypto Trading App",
+      description: "Trade memecoins and copy top traders.",
+      headings: ["where traders become legends"],
+      text: "join 2,500,000 traders",
+    };
+    const brief: BriefDraft = { product: "fomo", category: "social trading app", audience: "", website: "fomo.family", competitors: ["eToro"] };
+    const lookup = { reply: "wrong rivals", earlier: ["one", "two", "three"], name: "fomo", sites: ["fomo.family"], brief: { ...brief, competitors: ["eToro", "Coinbase"] }, rejected: ["etoro"] };
+    const prompt = buildLookupPrompt(lookup, [homepage]);
+    expect(prompt.system).toBe(LOOKUP_SYSTEM_PROMPT);
+    expect(prompt.user).toBe("fomo (fomo.family), social trading app: what it is and its main competitors");
+    expect(JSON.parse(prompt.context ?? "")).toEqual({
+      reply: "wrong rivals",
+      earlier: ["two", "three"],
+      brief: { product: "fomo", description: null, category: "social trading app", audience: null, websites: ["fomo.family"], competitors: ["Coinbase"], topics: [] },
+      rejected: ["etoro"],
+      homepages: [{ site: "fomo.family", title: homepage.title, description: homepage.description, headings: homepage.headings, text: homepage.text }],
+    });
+
+    const bare = buildLookupPrompt({ reply: `fomo ${"x".repeat(800)}`, earlier: [] }, []);
+    expect(bare.user).toBe(`fomo ${"x".repeat(115)}: what it is and its main competitors`);
+    expect(JSON.parse(bare.context ?? "")).toMatchObject({ brief: null, rejected: [], homepages: [] });
   });
 
   it("treats the user's words as data, in every prompt", () => {

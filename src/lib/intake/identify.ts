@@ -1,15 +1,19 @@
 import {
   buildIdentifyPrompt,
+  buildLookupPrompt,
   buildRevisePrompt,
   IDENTIFY_JSON_SCHEMA,
   parseIdentified,
+  parseLookup,
   parseRevision,
   REVISE_JSON_SCHEMA,
   type IdentifyInput,
+  type LookupInput,
   type ReviseInput,
 } from "@/lib/intake/brief";
-import { callStructuredModel, intakeRulesForced, resolveIntakeModel, type IntakeModelSetting, type StructuredSpec } from "@/lib/intake/model";
+import { callStructuredModel, intakeRulesForced, resolveIntakeModel, type IntakeModelSetting, type ModelPrompt, type StructuredSpec } from "@/lib/intake/model";
 import { decode } from "@/lib/intake/schema";
+import { readBrandSites, type SiteSnapshot } from "@/lib/intake/site";
 import { intakeTimeout } from "@/lib/intake/understand";
 import { truthy, type Env } from "@/lib/providers/config";
 import { BRAND_REVIEW_JSON_SCHEMA, buildBrandReviewPrompt, parseBrandReview, type BrandReviewInput } from "@/lib/sov/brand-review";
@@ -19,11 +23,12 @@ export type BriefFailure = "no-model" | "forced" | "timeout" | "error" | "invali
 /** The model's decoded output, checked on the server and read again in the browser. */
 export type BriefCall = { ok: true; output: unknown; costUsd: number } | { ok: false; reason: BriefFailure; costUsd?: number };
 
-export const LOOKUP_TIMEOUT_MS = 15_000;
-const LOOKUP_RESULTS = 3;
+/** For the model and its web search, after the brand's sites have been read (up to about 6.5 s). */
+export const LOOKUP_TIMEOUT_MS = 18_000;
+const LOOKUP_RESULTS = 8;
 
 const IDENTIFY_SPEC: StructuredSpec = { name: "brand_brief", schema: IDENTIFY_JSON_SCHEMA, maxTokens: 600, temperature: 0 };
-const LOOKUP_SPEC: StructuredSpec = { ...IDENTIFY_SPEC, webResults: LOOKUP_RESULTS };
+const LOOKUP_SPEC: StructuredSpec = { ...IDENTIFY_SPEC, maxTokens: 700, webResults: LOOKUP_RESULTS };
 const REVISE_SPEC: StructuredSpec = { name: "brief_revision", schema: REVISE_JSON_SCHEMA, maxTokens: 700, temperature: 0 };
 const BRAND_REVIEW_SPEC: StructuredSpec = { name: "brand_review", schema: BRAND_REVIEW_JSON_SCHEMA, maxTokens: 600, temperature: 0 };
 
@@ -45,7 +50,7 @@ class Timeout extends Error {}
 
 async function run(
   setting: IntakeModelSetting | null,
-  prompt: { system: string; user: string },
+  prompt: ModelPrompt,
   spec: StructuredSpec,
   valid: (output: unknown) => boolean,
   { env, fetchImpl, timeoutMs }: CallOptions,
@@ -77,12 +82,23 @@ export function identifyBrand(input: IdentifyInput, options: CallOptions): Promi
   return run(resolveIntakeModel(options.env), buildIdentifyPrompt(input), IDENTIFY_SPEC, (o) => parseIdentified(o, input) !== null, options);
 }
 
-/** Looks a brand the model didn't know up on the web, then drafts its brief. */
-export function lookUpBrand(input: IdentifyInput, options: CallOptions): Promise<BriefCall> {
-  return run(lookupSetting(options.env), buildIdentifyPrompt(input, true), LOOKUP_SPEC, (o) => parseIdentified(o, input, true) !== null, {
+/**
+ * Researches a brand the model didn't know: reads the brand's own homepages, searches the web, then drafts
+ * its brief with the rivals it really has. `read` lists the sites whose homepage was read.
+ */
+export async function lookUpBrand(
+  input: LookupInput,
+  options: CallOptions & { readSites?: (sites: string[]) => Promise<SiteSnapshot[]> },
+): Promise<BriefCall & { read: string[] }> {
+  const setting = lookupSetting(options.env);
+  const usable = setting && !intakeRulesForced(options.env);
+  const homepages = usable && input.sites?.length ? await (options.readSites ?? readBrandSites)(input.sites) : [];
+  const read = homepages.map((h) => h.site);
+  const call = await run(setting, buildLookupPrompt(input, homepages), LOOKUP_SPEC, (o) => parseLookup(o, input, read) !== null, {
     ...options,
     timeoutMs: options.timeoutMs ?? LOOKUP_TIMEOUT_MS,
   });
+  return { ...call, read };
 }
 
 /** Reads what the user wants changed in the brief. */

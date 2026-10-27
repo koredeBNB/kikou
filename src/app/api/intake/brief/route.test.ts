@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/intake/brief/route";
+import { safeFetch } from "@/lib/audit/safe-fetch";
 import { utcDay } from "@/lib/sov/budget";
 import { checkStore } from "@/lib/store";
+
+vi.mock("@/lib/audit/safe-fetch", async (importOriginal) => ({ ...(await importOriginal<object>()), safeFetch: vi.fn() }));
 
 let visitor = 0;
 const post = (payload: unknown, ip = `198.51.100.${++visitor}`) =>
@@ -46,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(safeFetch).mockReset();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -67,8 +71,22 @@ describe("POST /api/intake/brief", () => {
     vi.stubGlobal("fetch", fetchMock);
     const before = await spentToday();
     expect(await (await post({ mode: "lookup", reply: "Attio", earlier: [] })).json()).toMatchObject({ source: "ai", output: { name: "Attio" } });
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).plugins).toEqual([{ id: "web", engine: "exa", max_results: 3 }]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).plugins).toEqual([{ id: "web", engine: "exa", max_results: 8 }]);
     expect((await spentToday()) - before).toBeCloseTo(0.008, 6);
+  });
+
+  it("reads the brand's own site before searching, and says which sites it read", async () => {
+    vi.mocked(safeFetch).mockImplementation(async (url) => {
+      const page = (status: number, body: string, contentType: string) => ({ ok: true as const, page: { url, status, headers: {}, contentType, body, redirects: [], truncated: false } });
+      return url.endsWith("/robots.txt") ? page(404, "", "text/html") : page(200, "<html><head><title>fomo | Social Crypto Trading App</title></head><body><h1>trade memecoins</h1></body></html>", "text/html");
+    });
+    const fetchMock = modelReplies({ ...brand, name: "fomo", description: "the social crypto trading app", category: "crypto trading app", websites: ["fomo.family"] });
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await post({ mode: "lookup", reply: "https://fomo.family/?r=x", earlier: [], name: "fomo", sites: ["fomo.family"] });
+    expect(await response.json()).toMatchObject({ source: "ai", output: { name: "fomo" }, read: ["fomo.family"] });
+    expect(vi.mocked(safeFetch).mock.calls.map(([url]) => url)).toEqual(["https://fomo.family/robots.txt", "https://fomo.family/"]);
+    const messages = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).messages as { content: string }[];
+    expect(JSON.parse(messages[1].content).homepages[0]).toMatchObject({ site: "fomo.family", title: "fomo | Social Crypto Trading App" });
   });
 
   it("still books the cost of a lookup whose answer was unusable", async () => {
