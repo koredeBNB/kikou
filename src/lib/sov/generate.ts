@@ -1,4 +1,5 @@
-import { siteDomain } from "@/lib/sov/citations";
+import { listJoin } from "@/lib/format";
+import { ownDomains } from "@/lib/sov/citations";
 import { generateQuestions, normalizeBrief } from "@/lib/sov/questions";
 import type { Brief, Question, QuestionIntent } from "@/lib/sov/types";
 
@@ -50,8 +51,7 @@ function namePattern(name: string): RegExp | null {
 
 function productPatterns(brief: Brief): RegExp[] {
   const names = [brief.product];
-  const domain = siteDomain(brief.website);
-  if (domain) {
+  for (const domain of ownDomains(brief)) {
     names.push(domain);
     const stem = domain.split(".")[0];
     if (stem.length >= 3) names.push(stem);
@@ -222,6 +222,7 @@ export interface GenerationRequest {
   /** Never to be mentioned. */
   product: string;
   website?: string;
+  otherSites?: string[];
   topic?: string;
   angle: string;
   count: number;
@@ -249,8 +250,8 @@ const ANGLES = [
 const TOP_UP_ANGLE = "angles and situations the list to avoid doesn't cover yet";
 
 export function buildQuestionPrompt(request: GenerationRequest): { system: string; user: string } {
-  const { category, audience, competitors, product, website, topic, angle, count, year } = request;
-  const domain = siteDomain(website);
+  const { category, audience, competitors, product, topic, angle, count, year } = request;
+  const domains = ownDomains(request);
   const subject = `${category}${audience ? ` for ${audience}` : ""}`;
   const brands = competitors.length
     ? `- Only name brands from this list, and in at most a quarter of the questions: ${competitors.join(", ")}.`
@@ -259,7 +260,7 @@ export function buildQuestionPrompt(request: GenerationRequest): { system: strin
     "You write the questions real buyers type into AI assistants such as ChatGPT, Claude, Gemini and Perplexity while researching what to choose.",
     `Write exactly ${count} different questions about choosing a ${subject}${topic ? `, every one of them about ${topic}` : ""}.`,
     "Rules:",
-    `- Never mention “${product}”${domain ? ` or ${domain}` : ""}, and don't hint at it. The questions must be unbranded so every recommendation is unprompted.`,
+    `- Never mention “${product}”${domains.length ? ` or ${listJoin(domains, "or")}` : ""}, and don't hint at it. The questions must be unbranded so every recommendation is unprompted.`,
     brands,
     "- Every question should lead the assistant to name specific products: which one to pick, recommendations, alternatives or comparisons. No general how-to or explainer questions.",
     "- Each question stands alone in plain, everyday English, 6 to 25 words, and ends with a question mark.",
@@ -319,6 +320,7 @@ async function fill(
     competitors: brief.competitors,
     product: brief.product,
     website: brief.website,
+    otherSites: brief.otherSites,
     topic,
     year,
   };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectCitations, domainOf, extractUrls, stripTracking } from "@/lib/sov/citations";
+import { cleanSites, collectCitations, coveredBy, domainOf, extractUrls, otherSitesOf, ownDomains, siteFields, stripTracking } from "@/lib/sov/citations";
 
 describe("stripTracking", () => {
   it("drops utm_* and click-tracking parameters", () => {
@@ -94,5 +94,38 @@ describe("collectCitations", () => {
       { url: "https://usefathom.com/?plan=pro", domain: "usefathom.com" },
     ]);
     expect(collectCitations("https://plausible.io/pricing", ["https://plausible.io/pricing?utm_source=openai"])).toHaveLength(1);
+  });
+});
+
+describe("the brand's own sites", () => {
+  it("counts a domain and its subdomains, but not lookalikes", () => {
+    expect(coveredBy("docs.acme.io", ["acme.io"])).toBe(true);
+    expect(coveredBy("acme.io", ["other.com", "acme.io"])).toBe(true);
+    expect(coveredBy("notacme.io", ["acme.io"])).toBe(false);
+    expect(coveredBy("acme.io", [])).toBe(false);
+  });
+
+  it("cleans a list into bare domains, in order, without repeats, subdomains or junk, at most five", () => {
+    expect(cleanSites(["https://www.Acme.io/pricing", "acme.io", "docs.acme.io", "acme.dev", "", undefined, "nope"])).toEqual(["acme.io", "acme.dev"]);
+    expect(cleanSites(["blog.acme.io", "acme.io"])).toEqual(["acme.io"]);
+    expect(cleanSites(["a.com", "b.com", "c.com", "d.com", "e.com", "f.com"])).toHaveLength(5);
+  });
+
+  it("reads the main site first, then the others", () => {
+    expect(ownDomains({ website: "bnbchain.org", otherSites: ["bnb.org", "docs.bnbchain.org"] })).toEqual(["bnbchain.org", "bnb.org"]);
+    expect(ownDomains({ otherSites: ["bnb.org"] })).toEqual(["bnb.org"]);
+    expect(ownDomains({})).toEqual([]);
+  });
+
+  it("reads further sites from untrusted input, leaving out the main site and its subdomains", () => {
+    expect(otherSitesOf("https://www.bnbchain.org", ["docs.bnbchain.org", "bnbchain.org", "https://bnb.org/", 7, "nope"])).toEqual(["bnb.org"]);
+    expect(otherSitesOf(undefined, ["a.com", "b.com", "c.com", "d.com", "e.com"])).toHaveLength(4);
+    expect(otherSitesOf("acme.io", "acme.dev")).toEqual([]);
+  });
+
+  it("splits a list into brief fields, clearing both when it's empty", () => {
+    expect(siteFields(["bnbchain.org", "bnb.org"])).toEqual({ website: "bnbchain.org", otherSites: ["bnb.org"] });
+    expect(siteFields(["bnbchain.org"])).toEqual({ website: "bnbchain.org", otherSites: undefined });
+    expect(siteFields([])).toEqual({ website: undefined, otherSites: undefined });
   });
 });

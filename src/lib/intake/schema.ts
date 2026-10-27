@@ -8,7 +8,7 @@ import {
   type IntakeValues,
   type OptionalField,
 } from "@/lib/intake/types";
-import { siteDomain } from "@/lib/sov/citations";
+import { siteDomain, siteFields } from "@/lib/sov/citations";
 import { looksLikeName, MAX_QUESTION_COUNT, MAX_TOPICS, readAudience, readCategory, readCount } from "@/lib/sov/intake";
 
 const INTENTS: IntakeIntent[] = ["answer", "skip", "unclear"];
@@ -30,13 +30,14 @@ export const INTAKE_JSON_SCHEMA = {
     values: {
       type: "object",
       additionalProperties: false,
-      required: [...INTAKE_FIELDS],
+      required: [...INTAKE_FIELDS, "otherSites"],
       properties: {
         product: nullable("string"),
         category: nullable("string"),
         audience: nullable("string"),
         competitors: { ...nullable("array"), items: { type: "string" } },
         website: nullable("string"),
+        otherSites: { ...nullable("array"), items: { type: "string" } },
         topics: { ...nullable("array"), items: { type: "string" } },
         count: nullable("integer"),
       },
@@ -50,7 +51,7 @@ export const INTAKE_JSON_SCHEMA = {
 type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value);
 
-function decode(raw: unknown): unknown {
+export function decode(raw: unknown): unknown {
   if (typeof raw !== "string") return raw;
   const text = raw
     .trim()
@@ -64,10 +65,10 @@ function decode(raw: unknown): unknown {
 }
 
 const squash = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-const tidy = (value: string) => value.replace(/\s+/g, " ").trim().replace(/[.!?,;:]+$/, "").trim().slice(0, MAX_VALUE);
+export const tidy = (value: string) => value.replace(/\s+/g, " ").trim().replace(/[.!?,;:]+$/, "").trim().slice(0, MAX_VALUE);
 
 /** Brand names and domains must come from the reply itself, so the model can't invent them. */
-function inReply(value: string, reply: string): boolean {
+export function inReply(value: string, reply: string): boolean {
   const needle = squash(value);
   return needle.length > 0 && ` ${squash(reply)} `.includes(` ${needle} `);
 }
@@ -85,7 +86,7 @@ function cleanSkips(skips: unknown[], values: IntakeValues, reply: string): Opti
   return OPTIONAL_FIELDS.filter((field) => skips.includes(field) && values[field] === undefined && MENTIONS[field].test(reply));
 }
 
-function cleanMessage(value: string): string | undefined {
+export function cleanMessage(value: string): string | undefined {
   const text = value.replace(/\s+/g, " ").trim();
   if (!text || text.length > MAX_MESSAGE) return undefined;
   if (/https?:|www\.|[<>`]|\]\(/i.test(text)) return undefined;
@@ -101,7 +102,7 @@ function cleanValues(values: Json, reply: string, field?: IntakeField): { values
     if (value !== undefined && value !== null && typeof value !== "string") return null;
   }
   const rawCompetitors = values.competitors;
-  for (const key of ["competitors", "topics"] as const) {
+  for (const key of ["competitors", "topics", "otherSites"] as const) {
     const value = values[key];
     if (value !== undefined && value !== null && !isStringList(value)) return null;
   }
@@ -133,10 +134,10 @@ function cleanValues(values: Json, reply: string, field?: IntakeField): { values
     if (competitors.length) out.competitors = competitors;
   }
 
-  if (typeof values.website === "string") {
-    const domain = siteDomain(values.website.trim());
-    if (domain && inReply(domain, reply)) out.website = domain;
-  }
+  const sites = [values.website, ...(Array.isArray(values.otherSites) ? values.otherSites : [])].filter((s): s is string => typeof s === "string");
+  const { website, otherSites } = siteFields(sites.filter((site) => inReply(siteDomain(site.trim()) ?? "", reply)));
+  if (website) out.website = website;
+  if (otherSites) out.otherSites = otherSites;
 
   if (Array.isArray(values.topics)) {
     const seen = new Set<string>();

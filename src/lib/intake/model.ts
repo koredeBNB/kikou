@@ -3,17 +3,25 @@ import { INTAKE_JSON_SCHEMA } from "@/lib/intake/schema";
 import { OPENROUTER_BASE_URL, truthy, type Env } from "@/lib/providers/config";
 
 export type IntakeProvider = "openrouter" | "openai" | "anthropic" | "gemini";
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high";
+const EFFORTS: readonly ReasoningEffort[] = ["none", "minimal", "low", "medium", "high"];
 
 export interface IntakeModelSetting {
   provider: IntakeProvider;
   apiKey: string;
   model: string;
   baseUrl?: string;
+  /** OpenRouter only. "none" switches thinking off where the model allows it. */
+  reasoning?: ReasoningEffort;
+  /** OpenRouter only: models to try, in order, when the first one is down or rate-limited. */
+  fallbackModels?: string[];
 }
 
 export interface IntakeCallOptions {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Gets what the request cost in US dollars, when the provider says. */
+  onCost?: (usd: number) => void;
 }
 
 export type IntakeClient = (
@@ -30,13 +38,25 @@ export interface StructuredSpec {
   schema: Record<string, unknown>;
   maxTokens: number;
   temperature: number;
+  /** OpenRouter only: search the web first and hand the model this many results. */
+  webResults?: number;
 }
 
 const INTAKE_SPEC: StructuredSpec = { name: "intake_turn", toolName: "record_intake", schema: INTAKE_JSON_SCHEMA, maxTokens: 400, temperature: 0 };
 
-/** Cheapest fast model per provider, used without reasoning, in order of preference. */
-const CANDIDATES: { provider: IntakeProvider; keys: string[]; modelVar: string; model: string }[] = [
-  { provider: "openrouter", keys: ["OPENROUTER_API_KEY"], modelVar: "OPENROUTER_INTAKE_MODEL", model: "deepseek/deepseek-v4-flash" },
+/**
+ * Cheapest fast model per provider, in order of preference. Gemini 3.5 Flash Lite can't switch reasoning
+ * off, but at "low" it answers in about a second without thinking; 3.1 Flash Lite covers its rate limits.
+ */
+const CANDIDATES: { provider: IntakeProvider; keys: string[]; modelVar: string; model: string; reasoning?: ReasoningEffort; fallbacks?: string[] }[] = [
+  {
+    provider: "openrouter",
+    keys: ["OPENROUTER_API_KEY"],
+    modelVar: "OPENROUTER_INTAKE_MODEL",
+    model: "google/gemini-3.5-flash-lite",
+    reasoning: "low",
+    fallbacks: ["google/gemini-3.1-flash-lite"],
+  },
   { provider: "openai", keys: ["OPENAI_API_KEY"], modelVar: "OPENAI_INTAKE_MODEL", model: "gpt-4.1-nano" },
   { provider: "anthropic", keys: ["ANTHROPIC_API_KEY"], modelVar: "ANTHROPIC_INTAKE_MODEL", model: "claude-haiku-4-5" },
   { provider: "gemini", keys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"], modelVar: "GEMINI_INTAKE_MODEL", model: "gemini-2.5-flash-lite" },
@@ -46,15 +66,30 @@ export function intakeRulesForced(env: Env): boolean {
   return truthy(env.SOV_INTAKE_RULES) || truthy(env.SOV_FORCE_MOCK);
 }
 
+/** `OPENROUTER_INTAKE_REASONING` wins; a model picked with `OPENROUTER_INTAKE_MODEL` starts with reasoning off. */
+function reasoningFor(env: Env, custom: boolean, preset?: ReasoningEffort): ReasoningEffort {
+  const raw = env.OPENROUTER_INTAKE_REASONING?.trim().toLowerCase() as ReasoningEffort | undefined;
+  if (raw && EFFORTS.includes(raw)) return raw;
+  return custom ? "none" : (preset ?? "none");
+}
+
 export function resolveIntakeModel(env: Env): IntakeModelSetting | null {
   if (intakeRulesForced(env)) return null;
   for (const candidate of CANDIDATES) {
     const apiKey = candidate.keys.map((k) => env[k]?.trim()).find(Boolean);
     if (!apiKey) continue;
-    const model = env[candidate.modelVar]?.trim() || candidate.model;
-    return candidate.provider === "openrouter"
-      ? { provider: "openrouter", apiKey, model, baseUrl: env.OPENROUTER_BASE_URL?.trim() || OPENROUTER_BASE_URL }
-      : { provider: candidate.provider, apiKey, model };
+    const custom = env[candidate.modelVar]?.trim();
+    const model = custom || candidate.model;
+    if (candidate.provider !== "openrouter") return { provider: candidate.provider, apiKey, model };
+    const setting: IntakeModelSetting = {
+      provider: "openrouter",
+      apiKey,
+      model,
+      baseUrl: env.OPENROUTER_BASE_URL?.trim() || OPENROUTER_BASE_URL,
+      reasoning: reasoningFor(env, Boolean(custom), candidate.reasoning),
+    };
+    if (!custom && candidate.fallbacks) setting.fallbackModels = candidate.fallbacks;
+    return setting;
   }
   return null;
 }
@@ -69,14 +104,26 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
     body: JSON.stringify(body),
     signal: options.signal,
   });
-  if (!response.ok) throw new RequestFailed(response.status);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new RequestFailed(response.status, /reasoning is mandatory/i.test(detail));
+  }
   return (await response.json()) as Json;
 }
 
+/** The message never includes the response body, which could echo request details. */
 class RequestFailed extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly needsReasoning = false,
+  ) {
     super(`Intake model request failed (${status})`);
   }
+}
+
+function reportCost(data: Json, options: IntakeCallOptions) {
+  const cost = (data.usage as Json | undefined)?.cost;
+  if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) options.onCost?.(cost);
 }
 
 type Schema = Record<string, unknown>;
@@ -119,7 +166,7 @@ export async function callStructuredModel(
     case "openrouter": {
       const url = `${setting.baseUrl ?? OPENROUTER_BASE_URL}/chat/completions`;
       const headers = { authorization: `Bearer ${setting.apiKey}`, "x-title": BRAND_NAME };
-      const body = {
+      const body: Json = {
         model: setting.model,
         messages,
         response_format: responseFormat,
@@ -127,12 +174,22 @@ export async function callStructuredModel(
         temperature,
         max_tokens: maxTokens,
       };
-      // Reasoning models such as DeepSeek V4 Flash think by default and spend the whole output budget before
-      // answering. Models without a reasoning switch have no host that accepts it under require_parameters (404).
-      const data = await postJson(url, headers, { ...body, reasoning: { effort: "none" } }, options).catch((error: unknown) => {
-        if (error instanceof RequestFailed && error.status === 404) return postJson(url, headers, body, options);
+      if (setting.fallbackModels?.length) body.models = [setting.model, ...setting.fallbackModels];
+      if (spec.webResults) body.plugins = [{ id: "web", engine: "exa", max_results: spec.webResults }];
+      const effort = setting.reasoning ?? "none";
+      const send = (reasoning?: ReasoningEffort) =>
+        postJson(url, headers, reasoning ? { ...body, reasoning: { effort: reasoning } } : body, options);
+      // Reasoning models such as DeepSeek V4 Flash think by default and can spend the whole output budget
+      // before answering, so a model picked by override starts with reasoning switched off. Models without
+      // the switch have no host that accepts it under require_parameters (404); models that always reason
+      // refuse to turn it off (400).
+      const data = await send(effort).catch((error: unknown) => {
+        if (!(error instanceof RequestFailed) || effort !== "none") throw error;
+        if (error.status === 404) return send();
+        if (error.needsReasoning) return send("low");
         throw error;
       });
+      reportCost(data, options);
       return (asArray(data.choices)[0]?.message as Json | undefined)?.content;
     }
     case "openai": {

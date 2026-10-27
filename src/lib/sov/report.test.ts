@@ -117,6 +117,19 @@ describe("buildReport", () => {
     expect(report.domains.find((d) => d.domain === "acme.io")?.isOwn).toBe(true);
   });
 
+  it("counts citations of any of the brand's sites, subdomains included, as its own", () => {
+    const docs = answer("q2", "perplexity", "See the guide [1].", ["https://docs.acme.dev/agencies", "https://www.g2.com/compare/pipedrive"]);
+    const several = buildReport({ brief: { ...brief, otherSites: ["acme.dev"] }, questions, answers: [...answers.slice(0, 3), docs] });
+    expect(several.domains.filter((d) => d.isOwn).map((d) => d.domain).sort()).toEqual(["acme.io", "docs.acme.dev"]);
+    expect(report.domains.find((d) => d.domain === "docs.acme.dev")).toBeUndefined();
+  });
+
+  it("names every site when none of them was cited", () => {
+    const uncited = buildReport({ brief: { ...brief, website: "acme.co", otherSites: ["acme.dev"] }, questions, answers });
+    expect(uncited.domains.some((d) => d.isOwn)).toBe(false);
+    expect(uncited.recommendations.find((r) => r.id === "own-site")?.detail).toMatch(/^No model cited acme\.co or acme\.dev\./);
+  });
+
   it("summarises each model", () => {
     const perplexity = report.modelSummaries.find((m) => m.model === "perplexity")!;
     expect(perplexity.productMentionRate).toBe(0.5);

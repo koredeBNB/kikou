@@ -124,6 +124,10 @@ export function createMemoryStore(): CheckStore {
       return { costUsd: fromMicros(runs.get(runId)?.costMicros ?? 0) };
     },
 
+    async charge(day, costUsd, now) {
+      dayState(day, now).spentMicros += toMicros(costUsd);
+    },
+
     async hit(key, windowMs, now) {
       let counter = counters.get(key);
       if (!counter || counter.resetAt <= now) {

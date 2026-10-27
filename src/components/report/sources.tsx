@@ -5,6 +5,7 @@ import { ModelBadge } from "@/components/art/model-badge";
 import { Meter, SectionCard } from "@/components/report/shared";
 import { Badge } from "@/components/ui/badge";
 import { pct } from "@/lib/format";
+import { ownDomains } from "@/lib/sov/citations";
 import type { Report } from "@/lib/sov/types";
 import { cn } from "@/lib/utils";
 
@@ -15,10 +16,11 @@ export function SourcesCard({ report }: { report: Report }) {
   const own = report.domains.filter((d) => d.isOwn).reduce((s, d) => s + d.count, 0);
   const competitor = report.domains.filter((d) => d.isCompetitor).reduce((s, d) => s + d.count, 0);
   const max = Math.max(...top.map((d) => d.count), 1);
+  const sites = ownDomains(report.brief).length;
   const stats = [
     { label: "Citations", value: report.totalCitations },
     { label: "Domains", value: report.domains.length },
-    { label: report.brief.website ? "From your site" : "Add your site", value: report.brief.website ? own : "—" },
+    { label: sites ? `From your site${sites > 1 ? "s" : ""}` : "Add your site", value: sites ? own : "—" },
     { label: "From rivals' sites", value: competitor },
   ];
 

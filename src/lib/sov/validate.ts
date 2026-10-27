@@ -1,3 +1,4 @@
+import { otherSitesOf } from "@/lib/sov/citations";
 import type { CheckRequest } from "@/lib/sov/events";
 import { MAX_QUESTIONS } from "@/lib/sov/generate";
 import { MAX_TOPICS } from "@/lib/sov/intake";
@@ -42,6 +43,8 @@ function readBrief(input: unknown): { ok: true; value: Brief } | { ok: false; er
   if (!category) return { ok: false, error: "Tell me the product category." };
   const competitors = Array.isArray(brief.competitors) ? brief.competitors.map((c) => str(c)).filter(Boolean).slice(0, 8) : [];
   const value: Brief = { product, category, audience: str(brief.audience), competitors, website: str(brief.website) || undefined };
+  const otherSites = otherSitesOf(value.website, brief.otherSites);
+  if (otherSites.length) value.otherSites = otherSites;
   const topics = readTopics(brief.topics);
   if (topics) value.topics = topics;
   return { ok: true, value };

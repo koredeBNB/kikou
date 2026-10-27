@@ -141,6 +141,14 @@ describe("cleanGeneratedQuestions", () => {
     expect(kept).toEqual(["Which wallet can I trust with my life savings?"]);
   });
 
+  it("also drops questions naming any of the brand's other sites", () => {
+    const kept = cleanGeneratedQuestions(
+      ["Is staking on stake.twt.finance worth it?", "Should I hold TWT for lower wallet fees?", "Which crypto wallet has the lowest fees?"],
+      { brief: { ...wallet, otherSites: ["twt.finance"] } },
+    );
+    expect(kept).toEqual(["Which crypto wallet has the lowest fees?"]);
+  });
+
   it("drops blanks, non-strings, very short and very long questions", () => {
     expect(cleanGeneratedQuestions(["", 42, null, "Best?", `Which wallet ${"is really ".repeat(30)}good?`], { brief: wallet })).toEqual([]);
   });
@@ -223,6 +231,21 @@ describe("buildQuestionPrompt", () => {
     expect(prompt.system).toContain("beginners, budget");
     expect(prompt.system).toContain("MetaMask");
     expect(JSON.parse(prompt.user)).toMatchObject({ category: "crypto wallet", topic: "staking", count: 12, avoid: ["Which crypto wallet is best for staking?"] });
+  });
+
+  it("names every one of the brand's sites as off limits", () => {
+    const prompt = buildQuestionPrompt({
+      category: "crypto wallet",
+      audience: "",
+      competitors: [],
+      product: "Trust Wallet",
+      website: "trustwallet.com",
+      otherSites: ["twt.finance"],
+      angle: "a mix",
+      count: 5,
+      avoid: [],
+    });
+    expect(prompt.system).toContain("Never mention “Trust Wallet” or trustwallet.com or twt.finance");
   });
 
   it("asks for no brand names at all when there are no competitors", () => {

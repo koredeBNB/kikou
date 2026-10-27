@@ -1,3 +1,4 @@
+import { otherSitesOf } from "@/lib/sov/citations";
 import { MAX_TOPICS } from "@/lib/sov/intake";
 import type { Brief, Question } from "@/lib/sov/types";
 
@@ -21,12 +22,15 @@ export function normalizeBrief(brief: Brief): Brief {
     if (!topic || topics.some((t) => t.toLowerCase() === topic.toLowerCase())) continue;
     topics.push(topic);
   }
+  const website = brief.website?.trim() || undefined;
+  const otherSites = otherSitesOf(website, brief.otherSites);
   return {
     product,
     category: stripLead(brief.category, /^(?:a|an|the)\s+/i).replace(/[.!]+$/, ""),
     audience: stripLead(brief.audience, /^(?:for\s+)?(?:the\s+)?/i).replace(/[.!]+$/, ""),
     competitors,
-    website: brief.website?.trim() || undefined,
+    website,
+    otherSites: otherSites.length ? otherSites : undefined,
     topics: topics.length ? topics.slice(0, MAX_TOPICS) : undefined,
   };
 }

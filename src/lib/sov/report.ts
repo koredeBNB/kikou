@@ -1,4 +1,4 @@
-import { collectCitations, siteDomain } from "@/lib/sov/citations";
+import { collectCitations, coveredBy, ownDomains } from "@/lib/sov/citations";
 import { discoverBrands } from "@/lib/sov/discover";
 import { findMentions } from "@/lib/sov/mentions";
 import { buildRecommendations } from "@/lib/sov/recommendations";
@@ -142,7 +142,7 @@ export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 
     );
   const productStats = brands.find((b) => b.isProduct)!;
 
-  const ownDomain = siteDomain(brief.website);
+  const own = ownDomains(brief);
   const competitorKeys = new Set([...competitors, ...discovered].map(compact).filter(Boolean));
   const domainMap = new Map<string, { count: number; models: Set<ModelId>; urls: Set<string> }>();
   for (const a of analyzed) {
@@ -164,7 +164,7 @@ export function buildReport({ brief, questions, answers, discoverMinAnswers = 2 
         share: ratio(d.count, totalCitations),
         models: MODEL_IDS.filter((m) => d.models.has(m)),
         urls: [...d.urls],
-        isOwn: ownDomain !== null && (domain === ownDomain || domain.endsWith(`.${ownDomain}`)),
+        isOwn: coveredBy(domain, own),
         isCompetitor: labels.some((label) => competitorKeys.has(compact(label))),
       };
     })

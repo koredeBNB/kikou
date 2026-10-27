@@ -4,16 +4,17 @@ import { createMemoryStore } from "@/lib/store/memory";
 import type { CheckStore } from "@/lib/store/types";
 
 describe("hourlyLimit", () => {
-  it("allows 12 checks an hour by default, or SOV_CHECKS_PER_HOUR, with fixed limits for plans and intake", () => {
+  it("allows 12 checks an hour by default, or SOV_CHECKS_PER_HOUR, with fixed limits for plans, intake and lookups", () => {
     expect(hourlyLimit({}, "check")).toBe(12);
     expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "30" }, "check")).toBe(30);
     expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "lots" }, "check")).toBe(12);
     expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "30" }, "questions")).toBe(30);
     expect(hourlyLimit({}, "intake")).toBe(150);
+    expect(hourlyLimit({}, "lookup")).toBe(20);
   });
 
   it("can be switched off for everything", () => {
-    for (const bucket of ["check", "questions", "intake"] as const) expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "off" }, bucket)).toBeNull();
+    for (const bucket of ["check", "questions", "intake", "lookup"] as const) expect(hourlyLimit({ SOV_CHECKS_PER_HOUR: "off" }, bucket)).toBeNull();
   });
 });
 

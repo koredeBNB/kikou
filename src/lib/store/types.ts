@@ -68,6 +68,8 @@ export interface CheckStore {
   complete(request: CompleteRequest): Promise<void>;
   /** Drops the check's holds on these days and returns what its answers cost in total. */
   release(runId: string, days: string[]): Promise<{ costUsd: number }>;
+  /** Books spending outside a check, such as a web lookup while drafting a brief, to the day. */
+  charge(day: string, costUsd: number, now: number): Promise<void>;
   /** Counts one request in a fixed window that starts with the first one. */
   hit(key: string, windowMs: number, now: number): Promise<{ count: number; resetMs: number }>;
 }

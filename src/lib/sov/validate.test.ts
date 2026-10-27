@@ -91,6 +91,13 @@ describe("validateQuestionRequest", () => {
     });
   });
 
+  it("reads the brand's other sites as clean domains, leaving out junk and leaving the field off when there are none", () => {
+    const sites = validateQuestionRequest({ brief: { ...valid.brief, otherSites: ["https://www.acme.dev/docs", 7, "nope", "acme.dev"] }, count: 5 });
+    expect(sites.ok && sites.value.brief.otherSites).toEqual(["acme.dev"]);
+    const none = validateQuestionRequest({ brief: { ...valid.brief, otherSites: "acme.dev" }, count: 5 });
+    expect(none.ok && "otherSites" in none.value.brief).toBe(false);
+  });
+
   it("rejects a missing brief or a count outside 1 to 100", () => {
     expect(validateQuestionRequest({ brief: { category: "CRM" }, count: 10 })).toMatchObject({ ok: false });
     for (const count of [0, 101, 2.5, "10", undefined]) {

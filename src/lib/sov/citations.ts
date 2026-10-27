@@ -1,4 +1,4 @@
-import type { Citation } from "@/lib/sov/types";
+import type { Brief, Citation } from "@/lib/sov/types";
 
 const URL_PATTERN = /https?:\/\/[^\s<>"'`{}|\\^[\]]+/gi;
 const TRAILING_PUNCTUATION = /[.,;:!?'"*_]+$/;
@@ -86,4 +86,32 @@ export function siteDomain(website: string | undefined): string | null {
   if (!website?.trim()) return null;
   const value = website.trim();
   return domainOf(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+}
+
+export const MAX_SITES = 5;
+
+/** A domain counts as one of `sites` when it's the same or a subdomain of it ("docs.acme.io" for "acme.io"). */
+export const coveredBy = (domain: string, sites: string[]) => sites.some((site) => domain === site || domain.endsWith(`.${site}`));
+
+/** Domains in order, without repeats or subdomains of others in the list, at most `MAX_SITES`. */
+export function cleanSites(sites: (string | undefined)[]): string[] {
+  const domains = [...new Set(sites.map(siteDomain).filter((d): d is string => d !== null))];
+  return domains.filter((d) => !coveredBy(d, domains.filter((other) => other !== d))).slice(0, MAX_SITES);
+}
+
+/** The brand's own domains, main site first. */
+export const ownDomains = (brief: Pick<Brief, "website" | "otherSites">) => cleanSites([brief.website, ...(brief.otherSites ?? [])]);
+
+/** `otherSites` as clean domains, leaving out the main site and its subdomains, so the list stays within `MAX_SITES` in all. */
+export function otherSitesOf(website: string | undefined, others: unknown): string[] {
+  if (!Array.isArray(others)) return [];
+  const main = siteDomain(website);
+  const domains = cleanSites(others.map((site) => (typeof site === "string" ? site.slice(0, 120) : undefined)));
+  return domains.filter((domain) => !main || !coveredBy(domain, [main])).slice(0, MAX_SITES - 1);
+}
+
+/** Brief fields for a list of the brand's sites: the first is the main one. Empty fields are cleared. */
+export function siteFields(sites: (string | undefined)[]): Pick<Brief, "website" | "otherSites"> {
+  const [website, ...others] = cleanSites(sites);
+  return { website, otherSites: others.length ? others : undefined };
 }

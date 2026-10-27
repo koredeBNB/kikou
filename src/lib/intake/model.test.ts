@@ -24,14 +24,27 @@ describe("resolveIntakeModel", () => {
     expect(resolveIntakeModel({})).toBeNull();
   });
 
-  it("prefers OpenRouter with DeepSeek V4 Flash, overridable", () => {
+  it("prefers OpenRouter with Gemini 3.5 Flash Lite at low reasoning, falling back to 3.1 Flash Lite", () => {
     expect(resolveIntakeModel({ OPENROUTER_API_KEY: "or-key", OPENAI_API_KEY: "sk" })).toEqual({
       provider: "openrouter",
       apiKey: "or-key",
-      model: "deepseek/deepseek-v4-flash",
+      model: "google/gemini-3.5-flash-lite",
       baseUrl: "https://openrouter.ai/api/v1",
+      reasoning: "low",
+      fallbackModels: ["google/gemini-3.1-flash-lite"],
     });
-    expect(resolveIntakeModel({ OPENROUTER_API_KEY: "or-key", OPENROUTER_INTAKE_MODEL: "x/y" })?.model).toBe("x/y");
+  });
+
+  it("starts a model picked with OPENROUTER_INTAKE_MODEL with reasoning off and no fallbacks", () => {
+    const custom = resolveIntakeModel({ OPENROUTER_API_KEY: "or-key", OPENROUTER_INTAKE_MODEL: "x/y" });
+    expect(custom).toMatchObject({ model: "x/y", reasoning: "none" });
+    expect(custom?.fallbackModels).toBeUndefined();
+  });
+
+  it("takes the reasoning effort from OPENROUTER_INTAKE_REASONING when it's a known one", () => {
+    expect(resolveIntakeModel({ OPENROUTER_API_KEY: "k", OPENROUTER_INTAKE_REASONING: "Medium" })?.reasoning).toBe("medium");
+    expect(resolveIntakeModel({ OPENROUTER_API_KEY: "k", OPENROUTER_INTAKE_MODEL: "x/y", OPENROUTER_INTAKE_REASONING: "low" })?.reasoning).toBe("low");
+    expect(resolveIntakeModel({ OPENROUTER_API_KEY: "k", OPENROUTER_INTAKE_REASONING: "lots" })?.reasoning).toBe("low");
   });
 
   it("falls back to the cheapest model of the direct key that is set", () => {
@@ -93,6 +106,45 @@ describe("callIntakeModel", () => {
       response_format: { type: "json_schema", json_schema: { strict: true } },
       provider: { require_parameters: true },
     });
+  });
+
+  it("retries with low reasoning when the model can't switch it off", async () => {
+    const calls: FetchCall[] = [];
+    const impl = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return calls.length === 1
+        ? new Response(JSON.stringify({ error: { code: 400, message: "Reasoning is mandatory for this endpoint and cannot be disabled." } }), { status: 400 })
+        : new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }] }), { status: 200 });
+    }) as typeof fetch;
+
+    await callIntakeModel(setting({ model: "google/gemini-3.5-flash" }), prompt, { fetchImpl: impl });
+    expect(calls).toHaveLength(2);
+    expect(bodyOf(calls[1]).reasoning).toEqual({ effort: "low" });
+  });
+
+  it("sends the preset reasoning effort and fallback models, and reports the cost", async () => {
+    const { impl, calls } = fakeFetch({ choices: [{ message: { content: "{}" } }], usage: { cost: 0.00062 } });
+    const costs: number[] = [];
+    await callIntakeModel(setting({ reasoning: "low", fallbackModels: ["google/gemini-3.1-flash-lite"] }), prompt, {
+      fetchImpl: impl,
+      onCost: (usd) => costs.push(usd),
+    });
+    expect(bodyOf(calls[0])).toMatchObject({
+      model: "deepseek/deepseek-v4-flash",
+      models: ["deepseek/deepseek-v4-flash", "google/gemini-3.1-flash-lite"],
+      reasoning: { effort: "low" },
+    });
+    expect(costs).toEqual([0.00062]);
+  });
+
+  it("adds OpenRouter's web plugin when a task wants search results", async () => {
+    const { impl, calls } = fakeFetch({ choices: [{ message: { content: "{}" } }] });
+    const spec = { name: "brand_brief", schema: {}, maxTokens: 600, temperature: 0, webResults: 3 };
+    await callStructuredModel(setting({}), prompt, spec, { fetchImpl: impl });
+    expect(bodyOf(calls[0]).plugins).toEqual([{ id: "web", engine: "exa", max_results: 3 }]);
+    const plain = fakeFetch({ choices: [{ message: { content: "{}" } }] });
+    await callStructuredModel(setting({}), prompt, { ...spec, webResults: undefined }, { fetchImpl: plain.impl });
+    expect(bodyOf(plain.calls[0]).plugins).toBeUndefined();
   });
 
   it("doesn't retry OpenRouter on other errors", async () => {

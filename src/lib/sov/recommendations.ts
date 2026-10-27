@@ -1,4 +1,5 @@
-import { siteDomain } from "@/lib/sov/citations";
+import { listJoin } from "@/lib/format";
+import { ownDomains } from "@/lib/sov/citations";
 import { negativeTermsIn } from "@/lib/sov/mentions";
 import {
   MODEL_LABELS,
@@ -168,12 +169,12 @@ export function buildRecommendations(report: ReportWithoutRecommendations): Reco
     });
   }
 
-  const own = siteDomain(brief.website);
-  if (own && !report.domains.some((d) => d.isOwn)) {
+  const own = ownDomains(brief);
+  if (own.length > 0 && !report.domains.some((d) => d.isOwn)) {
     recs.push({
       id: "own-site",
       title: "Get your own site cited",
-      detail: `No model cited ${own}. Publish answer-shaped pages (FAQs, comparisons, pricing) with clear headings and facts that are easy to quote.`,
+      detail: `No model cited ${listJoin(own, "or")}. Publish answer-shaped pages (FAQs, comparisons, pricing) with clear headings and facts that are easy to quote.`,
       priority: "medium",
       area: "citations",
     });
