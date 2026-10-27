@@ -9,6 +9,8 @@ export interface PagePick {
 export const MAX_PAGES = 12;
 const MAX_CITED = 4;
 const MAX_PER_SECTION = 3;
+/** Pages matching one keyword before other kinds of page get a turn, so a sitemap full of pricing posts isn't the whole sample. */
+const MAX_PER_TOPIC = 2;
 
 /** The pages Pip's next steps tell people to publish, most useful to an assistant first. */
 const PRIORITY = [
@@ -105,7 +107,8 @@ function segments(url: URL): string[] {
     });
 }
 
-function rank(parts: string[]): number {
+/** How useful the page likely is (lower first) and the keyword that says so. */
+function rank(parts: string[]): { rank: number; topic?: string } {
   let best = PRIORITY.length;
   for (const part of parts) {
     for (const word of [part, ...part.split(/[-_.]/)]) {
@@ -113,7 +116,7 @@ function rank(parts: string[]): number {
       if (index >= 0 && index < best) best = index;
     }
   }
-  return best * 10 + parts.length;
+  return { rank: best * 10 + parts.length, topic: PRIORITY[best] };
 }
 
 export function pickPages({
@@ -151,15 +154,18 @@ export function pickPages({
     url.search = "";
     return url;
   };
-  const add = (url: URL, count: number, capSections: boolean) => {
+  const topics = new Map<string, number>();
+  const add = (url: URL, count: number, capSections: boolean, topic?: string) => {
     if (picks.length >= max) return;
     const key = pageKey(url.toString());
     if (keys.has(key)) return;
     const parts = segments(url);
     const section = (parts[0] && LOCALE.test(parts[0]) ? parts[1] : parts[0]) ?? "";
     if (capSections && section && (sections.get(section) ?? 0) >= MAX_PER_SECTION) return;
+    if (topic && (topics.get(topic) ?? 0) >= MAX_PER_TOPIC) return;
     keys.add(key);
     if (section) sections.set(section, (sections.get(section) ?? 0) + 1);
+    if (topic) topics.set(topic, (topics.get(topic) ?? 0) + 1);
     picks.push({ url: url.toString(), cited: count });
   };
 
@@ -174,8 +180,9 @@ export function pickPages({
   const ranked = candidates
     .map((raw, index) => ({ url: usable(raw), index }))
     .filter((c): c is { url: URL; index: number } => c.url !== null)
-    .map((c) => ({ ...c, rank: rank(segments(c.url)) }))
+    .map((c) => ({ ...c, ...rank(segments(c.url)) }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index);
+  for (const candidate of ranked) add(candidate.url, 0, true, candidate.topic);
   for (const candidate of ranked) add(candidate.url, 0, true);
   return picks;
 }

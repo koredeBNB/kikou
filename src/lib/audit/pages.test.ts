@@ -89,6 +89,18 @@ describe("pickPages", () => {
     expect(picks).toHaveLength(6);
   });
 
+  it("takes at most two pages about one thing while other kinds of page are left", () => {
+    const paths = ["/pricing", "/blog/new-pricing", "/docs/pricing", "/changelog/pricing-update", "/docs/pricing/taxes", "/docs/getting-started", "/customers", "/about", "/blog/post"];
+    const picks = pickPages({ origin: ORIGIN, site: "thimble.studio", cited: [], candidates: paths.map((p) => `${ORIGIN}${p}`), max: 6 });
+    expect(picks.map((p) => new URL(p.url).pathname)).toEqual(["/", "/pricing", "/blog/new-pricing", "/docs/getting-started", "/customers", "/about"]);
+  });
+
+  it("still fills up with more pages about one thing when there's nothing else", () => {
+    const paths = ["/pricing", "/docs/pricing", "/blog/pricing-a", "/changelog/pricing-b"];
+    const picks = pickPages({ origin: ORIGIN, site: "thimble.studio", cited: [], candidates: paths.map((p) => `${ORIGIN}${p}`) });
+    expect(picks.map((p) => new URL(p.url).pathname)).toEqual(["/", "/pricing", "/docs/pricing", "/blog/pricing-a", "/changelog/pricing-b"]);
+  });
+
   it("stops at the page limit", () => {
     const picks = pickPages({
       origin: ORIGIN,
