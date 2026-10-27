@@ -302,7 +302,7 @@ function renderingArea(facts: AuditFacts, findings: Finding[]): AreaScore {
       severity: home || blank.length / read.length >= 0.3 ? "fail" : "warn",
       impact: lost(blank, () => 0.8),
       title: home && blank.length === 1 ? "Serve your homepage's content without JavaScript" : `Serve ${namePaths(blank.map((p) => (isHome(p) ? "your homepage" : pathOf(p.url))))} without JavaScript`,
-      detail: `AI crawlers read ${plural(example.words, "word")} on ${isHome(example) ? "your homepage" : pathOf(example.url)}${example.appShell ? ` (${example.appShell.toLowerCase()})` : ""}. GPTBot, ClaudeBot and PerplexityBot don't run JavaScript, so render ${blank.length === 1 ? "this page" : "these pages"} on the server or pre-render ${blank.length === 1 ? "it" : "them"}.`,
+      detail: `AI crawlers read ${plural(example.words, "word")} on ${isHome(example) ? "your homepage" : pathOf(example.url)}${example.appShell ? ` (${example.appShell.charAt(0).toLowerCase()}${example.appShell.slice(1)})` : ""}. GPTBot, ClaudeBot and PerplexityBot don't run JavaScript, so render ${blank.length === 1 ? "this page" : "these pages"} on the server or pre-render ${blank.length === 1 ? "it" : "them"}.`,
     });
   }
   if (thin.length) {

@@ -154,7 +154,7 @@ export interface Recommendation {
   title: string;
   detail: string;
   priority: RecommendationPriority;
-  area: "visibility" | "citations" | "models" | "positioning" | "sentiment";
+  area: "visibility" | "citations" | "models" | "positioning" | "sentiment" | "readability";
 }
 
 export interface Report {

@@ -1,3 +1,4 @@
+import type { SiteAudit } from "@/lib/audit/types";
 import { listJoin } from "@/lib/format";
 import { ownDomains } from "@/lib/sov/citations";
 import { negativeTermsIn } from "@/lib/sov/mentions";
@@ -225,9 +226,28 @@ export function buildRecommendations(report: ReportWithoutRecommendations): Reco
     area: "visibility",
   });
 
+  return byPriority(recs).slice(0, MAX_RECOMMENDATIONS);
+}
+
+function byPriority(recs: Recommendation[]): Recommendation[] {
   return recs
     .map((rec, index) => ({ rec, index }))
     .sort((a, b) => PRIORITY_ORDER[a.rec.priority] - PRIORITY_ORDER[b.rec.priority] || a.index - b.index)
-    .slice(0, MAX_RECOMMENDATIONS)
     .map(({ rec }) => rec);
+}
+
+/** A readability warning this many points or more is worth a next step. */
+const READABILITY_WARN_IMPACT = 5;
+const MAX_READABILITY_RECS = 2;
+
+/** The site audit's worst findings join the next steps; the worst one always gets a place. */
+export function withReadability(recs: Recommendation[], audit: SiteAudit | undefined): Recommendation[] {
+  const extra: Recommendation[] = (audit?.findings ?? [])
+    .filter((f) => f.severity === "fail" || f.impact >= READABILITY_WARN_IMPACT)
+    .slice(0, MAX_READABILITY_RECS)
+    .map((f) => ({ id: `readability-${f.id}`, title: f.title, detail: f.detail, priority: f.severity === "fail" ? "high" : "medium", area: "readability" }));
+  if (extra.length === 0) return recs;
+  const merged = byPriority([...recs, ...extra]).slice(0, MAX_RECOMMENDATIONS);
+  if (merged.includes(extra[0])) return merged;
+  return byPriority([...merged.slice(0, MAX_RECOMMENDATIONS - 1), extra[0]]);
 }

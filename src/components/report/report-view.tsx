@@ -7,15 +7,18 @@ import { Methodology } from "@/components/report/methodology";
 import { ModelBreakdown } from "@/components/report/models";
 import { AssistantsGlance, KpiStack, ReportHeader, ShareOfVoiceCard, VerdictBanner } from "@/components/report/overview";
 import { PromptsCard } from "@/components/report/prompts";
+import { ReadabilityCard } from "@/components/report/readability";
 import { ReportShell } from "@/components/report/report-shell";
 import { ReportLoading, ReportNotFound } from "@/components/report/report-states";
 import { brandColors, Reveal } from "@/components/report/shared";
 import { SourcesCard } from "@/components/report/sources";
 import { TopicsCard } from "@/components/report/topics";
+import { useSiteAudit } from "@/components/report/use-site-audit";
 import { requestBrandReview, type BrandReview } from "@/lib/sov/brand-review";
 import { buildDemoRun, DEMO_RUN_ID } from "@/lib/sov/demo";
+import { withReadability } from "@/lib/sov/recommendations";
 import { brandReviewInput, buildReport } from "@/lib/sov/report";
-import { runKey, unsavedRun, updateRun, type StoredRun } from "@/lib/sov/storage";
+import { loadRun, runKey, unsavedRun, updateRun, type StoredRun } from "@/lib/sov/storage";
 import { buildTopicBreakdown } from "@/lib/sov/topics";
 import type { AnalyzedAnswer } from "@/lib/sov/types";
 
@@ -62,7 +65,7 @@ function reviewFor(run: StoredRun): Promise<BrandReview | null> {
     const input = brandReviewInput(run.brief, run.answers);
     review = input
       ? requestBrandReview(input).then((result) => {
-          if (result) updateRun({ ...run, brandReview: result });
+          if (result) updateRun({ ...(loadRun(run.id) ?? run), brandReview: result });
           return result;
         })
       : Promise.resolve(null);
@@ -90,7 +93,9 @@ function useBrandReview(run: StoredRun): BrandReview | undefined {
 
 function Dashboard({ run }: { run: StoredRun }) {
   const review = useBrandReview(run);
-  const report = useMemo(() => buildReport({ brief: run.brief, questions: run.questions, answers: run.answers, review }), [run, review]);
+  const base = useMemo(() => buildReport({ brief: run.brief, questions: run.questions, answers: run.answers, review }), [run, review]);
+  const siteAudit = useSiteAudit(run, base);
+  const report = useMemo(() => ({ ...base, recommendations: withReadability(base.recommendations, siteAudit.audit) }), [base, siteAudit.audit]);
   const topics = useMemo(() => buildTopicBreakdown(run, report), [run, report]);
   const colors = useMemo(() => brandColors(report), [report]);
   const [open, setOpen] = useState<AnalyzedAnswer | null>(null);
@@ -144,6 +149,10 @@ function Dashboard({ run }: { run: StoredRun }) {
             <SentimentCard report={report} />
           </Reveal>
         </div>
+
+        <Reveal>
+          <ReadabilityCard view={siteAudit.view} onRecheck={siteAudit.recheck} />
+        </Reveal>
 
         <Reveal>
           <PromptsCard report={report} errors={run.errors ?? []} onOpenAnswer={setOpen} />

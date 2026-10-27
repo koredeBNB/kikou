@@ -2,6 +2,7 @@
 
 import {
   AiChat02Icon,
+  AiScanIcon,
   Idea01Icon,
   Link01Icon,
   RankingIcon,
@@ -27,6 +28,7 @@ const AREA_ICONS: Record<Recommendation["area"], { icon: IconSvgElement; tint: s
   models: { icon: AiChat02Icon, tint: "bg-meadow-100 text-meadow-700" },
   positioning: { icon: RankingIcon, tint: "bg-sun-100 text-[#a86f12]" },
   sentiment: { icon: SmileIcon, tint: "bg-blush-100 text-[#a5463d]" },
+  readability: { icon: AiScanIcon, tint: "bg-sky-100 text-sky-700" },
 };
 
 const PRIORITY = {

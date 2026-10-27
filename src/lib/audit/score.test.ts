@@ -174,7 +174,7 @@ describe("scoreAudit", () => {
     expect(rendering.note).toBe("1 of 3 pages blank without JavaScript");
     const finding = audit.findings.find((f) => f.id === "blank-pages");
     expect(finding).toMatchObject({ severity: "fail", title: "Serve your homepage's content without JavaScript" });
-    expect(finding?.detail).toContain("12 words");
+    expect(finding?.detail).toContain("12 words on your homepage (an empty #root element that JavaScript fills in)");
   });
 
   it("leaves skipped and failed pages out of the rendering score", () => {

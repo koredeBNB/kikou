@@ -40,6 +40,14 @@ const ITEMS = [
     a: "Links returned by the assistant (Perplexity citations, Gemini search grounding, ChatGPT and Claude web search) plus links written into the answer. Each URL counts once per answer, grouped by domain.",
   },
   {
+    q: "How is AI readability graded?",
+    a: "Pip reads your site the way AI crawlers do, without running JavaScript, and scores it out of 100: crawler access (35), text that's in the HTML rather than loaded by JavaScript (30), structured data such as Organization and Article markup (20), and discovery files: a sitemap, canonical tags and llms.txt (15). Blocking a search crawler costs a lot, because it stops live answers citing you. Blocking a training crawler barely counts. Pip reads up to 12 pages: your homepage, the pages the answers cited, then pricing, comparison, docs and similar pages.",
+  },
+  {
+    q: "How does Kioku's crawler treat my site?",
+    a: "It calls itself KiokuBot, obeys robots.txt for every page it reads, and reads at most 12 pages, a few at a time. The exceptions are robots.txt itself, one homepage request as a normal browser, and one homepage request carrying each AI crawler's name to see whether your firewall lets it in. Those come from Kioku's servers, not the crawlers' real addresses, so confirm a refusal in your firewall's logs.",
+  },
+  {
     q: "How is sentiment judged?",
     a: "A light word list looks at the sentence around each mention, with simple negation handling. Treat it as a direction, not a verdict, and read the answers for nuance.",
   },
