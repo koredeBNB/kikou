@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { emptyIntake } from "@/lib/intake/flow";
-import { requestIdentify, requestIntake, requestLookup, requestRevision, validateBriefRequest, validateIntakeRequest } from "@/lib/intake/request";
+import {
+  LOOKUP_CLIENT_TIMEOUT_MS,
+  requestIdentify,
+  requestIntake,
+  requestLookup,
+  requestRevision,
+  validateBriefRequest,
+  validateIntakeRequest,
+} from "@/lib/intake/request";
 
 describe("validateIntakeRequest", () => {
   it("accepts a reply for a known field and normalises the state", () => {
@@ -140,6 +148,31 @@ describe("validateBriefRequest", () => {
     expect(validateBriefRequest({ mode: "lookup", reply: "Attio" })).toEqual({ ok: true, value: { mode: "lookup", reply: "Attio", earlier: [] } });
   });
 
+  it("takes a lookup's brand name, up to two clean sites to read, the brief so far and the rivals turned down", () => {
+    const parsed = validateBriefRequest({
+      mode: "lookup",
+      reply: "wrong rivals",
+      earlier: [],
+      name: " fomo ",
+      sites: ["https://www.fomo.family/?r=x", "app.fomo.family", "fomo.xyz", "fomo.blog", "not a site", 4],
+      brief: { product: "fomo", category: "social trading app", competitors: ["eToro"], website: "fomo.family" },
+      rejected: ["eToro", " Public ", 3, "", ...Array.from({ length: 10 }, (_, i) => `Rival ${i}`)],
+    });
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        mode: "lookup",
+        reply: "wrong rivals",
+        earlier: [],
+        name: "fomo",
+        sites: ["fomo.family", "fomo.xyz"],
+        brief: { product: "fomo", category: "social trading app", audience: "", competitors: ["eToro"], website: "fomo.family" },
+        rejected: ["eToro", "Public", "Rival 0", "Rival 1", "Rival 2", "Rival 3", "Rival 4", "Rival 5"],
+      },
+    });
+    expect(validateBriefRequest({ mode: "lookup", reply: "fomo", brief: { product: "fomo" } })).toEqual({ ok: true, value: { mode: "lookup", reply: "fomo", earlier: [] } });
+  });
+
   it("normalises the brief of a revision and defaults the stage to confirm", () => {
     const parsed = validateBriefRequest({
       mode: "revise",
@@ -207,8 +240,23 @@ describe("brief requests", () => {
       },
       lookup: true,
     });
-    const lookedUp = await requestLookup({ reply: "Attica", earlier: [] }, { fetchImpl: respond({ source: "ai", output }) });
+    const lookedUp = await requestLookup({ reply: "Attica", earlier: [] }, { fetchImpl: respond({ source: "ai", output, read: [] }) });
     expect(lookedUp).toBeNull();
+  });
+
+  it("accepts a lookup that names the brand from a site the server read, and sends what it needs", async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ source: "ai", output: { ...output, name: "Attio", websites: [] }, read: ["attio.com"] }), { status: 200 });
+    }) as typeof fetch;
+    const lookup = { reply: "it's attio.com", earlier: [], name: "Atio", sites: ["attio.com"] };
+    expect(await requestLookup(lookup, { fetchImpl })).toMatchObject({ kind: "draft", brief: { product: "Attio", website: "attio.com" } });
+    expect(bodies[0]).toEqual({ mode: "lookup", ...lookup });
+  });
+
+  it("waits longer for a lookup than for other brief requests, since it reads sites and searches the web", () => {
+    expect(LOOKUP_CLIENT_TIMEOUT_MS).toBeGreaterThanOrEqual(28_000);
   });
 
   it("returns nothing when the server falls back, fails or is slow, so the intake carries on", async () => {

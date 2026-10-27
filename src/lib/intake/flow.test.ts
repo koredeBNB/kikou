@@ -8,11 +8,22 @@ import {
   draftLine,
   emptyIntake,
   nextField,
+  draftResearch,
+  MAX_LOOKUPS,
+  NO_RESEARCH,
   questionCount,
   questionFor,
+  rejectsRivals,
+  researched,
+  researchedLine,
+  researchFailedLine,
+  researchLine,
+  replyResearch,
   settleSites,
   SITES_COPY,
+  sitesToRead,
   toBrief,
+  type Research,
 } from "@/lib/intake/flow";
 import type { IntakeState, OptionalField } from "@/lib/intake/types";
 
@@ -306,6 +317,7 @@ describe("drafted briefs", () => {
     expect(draftLine({ ...drafted, description: "the Layer 1 blockchain behind BNB" }, { known: true })).toMatch(/^Do you mean \*\*BNB Chain\*\*, the Layer 1 blockchain behind BNB\?/);
     expect(draftLine(drafted, { known: true, web: true })).toMatch(/^I looked it up\. Is it \*\*BNB Chain\*\*, a layer 1 blockchain\?/);
     expect(draftLine(drafted, { known: false })).toMatch(/^I don't know \*\*BNB Chain\*\* yet, so I went by what you said\./);
+    expect(draftLine(drafted, { known: false, searched: true })).toMatch(/^I couldn't find much about \*\*BNB Chain\*\* online, so I went by what you said\./);
   });
 
   it("reads several sites from one answer to the website question", () => {
@@ -343,5 +355,98 @@ describe("settleSites", () => {
     expect(settled.state.skipped).toContain("website");
     expect(settled.next).toBe("count");
     expect(settled.text).toMatch(/^No problem, we'll go without it\. Last one/);
+  });
+});
+
+describe("researching the brand", () => {
+  const ready: Research = { ...NO_RESEARCH, available: true };
+  const fomo = { product: "fomo", category: "social trading app", audience: "", competitors: ["eToro", "Public", "Robinhood", "ZuluTrade"] };
+  const pasted = "https://fomo.family/?r=FunnyDirtyBee&gclid=EAIaIQobChMIj social trading crypto app";
+
+  it("spots a reply turning down the rivals Pip suggested", () => {
+    for (const reply of [
+      "wrong rivals",
+      "Wrong competitors!",
+      "the rivals are wrong",
+      "those competitors are way off",
+      "these aren't its competitors",
+      "they're not the right rivals",
+      "not its real competitors",
+      "find the real competitors",
+      "better rivals please",
+      "the competitors don't make sense",
+      "rivals are irrelevant, it's crypto",
+    ]) {
+      expect(rejectsRivals(reply), reply).toBe(true);
+    }
+    for (const reply of ["looks right", "wrong", "drop eToro", "add Base as a rival", "those are the right rivals", "the rivals look good", "no rivals", "it's for crypto traders"]) {
+      expect(rejectsRivals(reply), reply).toBe(false);
+    }
+  });
+
+  it("reads sites Pip hasn't read yet, skipping ones a brief it trusts already lists", () => {
+    expect(sitesToRead(pasted, ready)).toEqual(["fomo.family"]);
+    expect(sitesToRead(pasted, { ...ready, read: ["fomo.family"] })).toEqual([]);
+    expect(sitesToRead("not fomo.app, it's fomo.family", ready)).toEqual(["fomo.family"]);
+    expect(sitesToRead("also fomo.family", { ...ready, known: true }, { ...fomo, website: "fomo.family" })).toEqual([]);
+    expect(sitesToRead("fomo.family", ready, { ...fomo, website: "fomo.family" })).toEqual(["fomo.family"]);
+    expect(sitesToRead("a.com b.com c.com", ready)).toEqual(["a.com", "b.com"]);
+  });
+
+  it("researches a brand Pip didn't know, or one whose site the draft doesn't list", () => {
+    expect(draftResearch("fomo the social trading app", ready, { known: false, brief: fomo })).toEqual({ why: "unknown", sites: [], rejected: [] });
+    expect(draftResearch(`fomo ${pasted}`, ready)).toEqual({ why: "unknown", sites: ["fomo.family"], rejected: [] });
+    expect(draftResearch("Notion", ready, { known: true, brief: { ...fomo, product: "Notion", website: "notion.so" } })).toBeNull();
+    expect(draftResearch("Notion notion.so", ready, { known: true, brief: { ...fomo, product: "Notion", website: "notion.so" } })).toBeNull();
+    expect(draftResearch("fomo fomo.family", ready, { known: true, brief: { ...fomo, website: "fomo.com" } })).toEqual({ why: "site", sites: ["fomo.family"], rejected: [] });
+    expect(draftResearch("fomo the social trading app", NO_RESEARCH, { known: false, brief: fomo })).toBeNull();
+  });
+
+  it("researches again when a reply gives a new site or turns down the rivals, reading the brand's site if it hasn't yet", () => {
+    expect(replyResearch(pasted, ready, fomo)).toEqual({ why: "site", sites: ["fomo.family"], rejected: [] });
+    expect(replyResearch("wrong rivals", ready, { ...fomo, website: "fomo.family" })).toEqual({ why: "rivals", sites: ["fomo.family"], rejected: fomo.competitors });
+    expect(replyResearch("wrong rivals", { ...ready, read: ["fomo.family"] }, { ...fomo, website: "fomo.family" })).toEqual({ why: "rivals", sites: [], rejected: fomo.competitors });
+    expect(replyResearch(`wrong rivals, it's ${pasted}`, ready, fomo)).toEqual({ why: "site", sites: ["fomo.family"], rejected: fomo.competitors });
+    expect(replyResearch("add Base", ready, fomo)).toBeNull();
+    expect(replyResearch("also fomo.family", { ...ready, known: true }, { ...fomo, website: "fomo.family" })).toBeNull();
+  });
+
+  it("reads a new site on the website question or the plan only for a brand Pip doesn't know, since adding domains is the point there", () => {
+    const known = { ...ready, known: true };
+    const listed = { ...fomo, website: "fomo.family" };
+    expect(replyResearch("also fomo.blog", known, listed)).toEqual({ why: "site", sites: ["fomo.blog"], rejected: [] });
+    expect(replyResearch("also fomo.blog", known, listed, "sites")).toBeNull();
+    expect(replyResearch("also fomo.blog", known, listed, "plan")).toBeNull();
+    expect(replyResearch("also fomo.blog", ready, listed, "sites")).toEqual({ why: "site", sites: ["fomo.blog"], rejected: [] });
+    expect(replyResearch("wrong rivals", { ...known, read: ["fomo.family"] }, listed, "plan")).toEqual({ why: "rivals", sites: [], rejected: fomo.competitors });
+  });
+
+  it(`stops after ${MAX_LOOKUPS} lookups, or when lookups aren't available`, () => {
+    let research = ready;
+    for (let i = 0; i < MAX_LOOKUPS; i++) {
+      expect(replyResearch("wrong rivals", research, fomo)).not.toBeNull();
+      research = researched(research, ["fomo.family"], false);
+    }
+    expect(research).toEqual({ available: true, known: false, read: ["fomo.family"], lookups: MAX_LOOKUPS });
+    expect(replyResearch("wrong rivals", research, fomo)).toBeNull();
+    expect(replyResearch("wrong rivals", NO_RESEARCH, fomo)).toBeNull();
+    expect(researched(ready, ["fomo.family"], true)).toMatchObject({ known: true, lookups: 1 });
+  });
+
+  it("says what Pip is looking up, what it found and when it found nothing", () => {
+    expect(researchLine("fomo", { why: "unknown", sites: [], rejected: [] })).toBe("I don't know **fomo** yet, so let me look it up…");
+    expect(researchLine("fomo", { why: "unknown", sites: ["fomo.family"], rejected: [] })).toBe("I don't know **fomo** yet, so let me read **fomo.family** and look it up…");
+    expect(researchLine("fomo", { why: "site", sites: ["fomo.family"], rejected: [] })).toBe("Let me read **fomo.family** and look **fomo** up, so the brief's right…");
+    expect(researchLine("fomo", { why: "rivals", sites: [], rejected: ["eToro"] })).toBe("Let me look into who **fomo** really competes with…");
+    const found = { ...fomo, description: "the social crypto trading app", competitors: ["Coinbase"] };
+    expect(researchedLine(found, { why: "unknown", sites: [], rejected: [] })).toMatch(/^I looked it up\. Is it \*\*fomo\*\*, the social crypto trading app\?/);
+    expect(researchedLine(found, { why: "site", sites: ["fomo.family"], rejected: [] })).toMatch(/^I looked it up\. Is it \*\*fomo\*\*, the social crypto trading app\?/);
+    expect(researchedLine(found, { why: "rivals", sites: [], rejected: ["eToro"] })).toBe(
+      "I looked into who **fomo** competes with and updated the rivals. Anything else to change, or does it look right?",
+    );
+    expect(researchedLine(found, { why: "rivals", sites: [], rejected: ["eToro"] }, "plan")).toBe("I looked into who **fomo** competes with and updated the rivals.");
+    expect(researchedLine(found, { why: "site", sites: ["fomo.family"], rejected: [] }, "plan")).toBe("I looked **fomo** up and updated the brief.");
+    expect(researchFailedLine("fomo", { why: "rivals", sites: [], rejected: ["eToro"] })).toBe("I couldn't find better rivals for **fomo** online just now.");
+    expect(researchFailedLine("fomo", { why: "site", sites: ["fomo.family"], rejected: [] })).toBe("I couldn't find more about **fomo** online just now.");
   });
 });

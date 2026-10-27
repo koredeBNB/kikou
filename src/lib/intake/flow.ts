@@ -9,10 +9,10 @@ import {
   type OptionalField,
   type PipLine,
 } from "@/lib/intake/types";
-import type { BriefDraft } from "@/lib/intake/brief";
+import { MAX_LOOKUP_SITES, type BriefDraft, type BriefStage } from "@/lib/intake/brief";
 import { listJoin } from "@/lib/format";
-import { ownDomains, siteFields } from "@/lib/sov/citations";
-import { MAX_QUESTION_COUNT } from "@/lib/sov/intake";
+import { coveredBy, ownDomains, siteFields } from "@/lib/sov/citations";
+import { MAX_QUESTION_COUNT, readSiteChanges } from "@/lib/sov/intake";
 import type { Brief } from "@/lib/sov/types";
 
 export const DEFAULT_QUESTION_COUNT = 10;
@@ -155,17 +155,120 @@ export function questionFor(field: IntakeField, state: IntakeState): string {
 const CHECK_BRIEF = "Here's the brief I'd use. Tell me anything to change, or say it looks right.";
 const WHAT_IS_IT = "What is it, in a few words? Something like “plant care app” or “CRM for small agencies” works.";
 
-/** Pip's lines for a drafted brief, used when the model's own message can't be. */
-export function draftLine(brief: BriefDraft, { known, web = false }: { known: boolean; web?: boolean }): string {
-  if (!known) return `I don't know **${brief.product}** yet, so I went by what you said. ${CHECK_BRIEF}`;
+/** Pip's lines for a drafted brief, used when the model's own message can't be. `searched`: a lookup found nothing. */
+export function draftLine(brief: BriefDraft, { known, web = false, searched = false }: { known: boolean; web?: boolean; searched?: boolean }): string {
+  if (!known) {
+    const opener = searched ? `I couldn't find much about **${brief.product}** online` : `I don't know **${brief.product}** yet`;
+    return `${opener}, so I went by what you said. ${CHECK_BRIEF}`;
+  }
   const what = brief.description ?? withArticle(brief.category);
   return `${web ? "I looked it up. Is it" : "Do you mean"} **${brief.product}**, ${what}? ${CHECK_BRIEF}`;
 }
 
 export const ambiguousLine = (name: string) => `**${name}** could be a few different things. Which one do you mean? Pick one below or say it in a few words.`;
-export const lookingUpLine = (name: string) => `I don't know **${name}** yet, so let me look it up…`;
 export const unknownLine = (name: string, lookedUp: boolean) =>
   lookedUp ? `I couldn't find **${name}** online, so I'll need your help. ${WHAT_IS_IT}` : `I don't know **${name}** yet. ${WHAT_IS_IT}`;
+
+/** Lookups in one intake: when Pip first meets the brand, then for a site it hasn't read or rivals the user turned down. */
+export const MAX_LOOKUPS = 3;
+
+/** What Pip has looked up about the brand so far, so it never reads the same site twice. */
+export interface Research {
+  /** A lookup can run at all: there's a model with web search, and room in today's budget. */
+  available: boolean;
+  /** Pip knew the brand or found it online, so the sites its brief lists are already right. */
+  known: boolean;
+  /** Sites Pip has tried to read. */
+  read: string[];
+  lookups: number;
+}
+
+export const NO_RESEARCH: Research = { available: false, known: false, read: [], lookups: 0 };
+
+/**
+ * "unknown": Pip doesn't know the brand. "site": the user gave a site Pip hasn't read. "rivals": the user
+ * turned down the rivals (`rejected`). `sites` are the brand's sites to read first.
+ */
+export interface ResearchPlan {
+  why: "unknown" | "site" | "rivals";
+  sites: string[];
+  rejected: string[];
+}
+
+const canResearch = (research: Research) => research.available && research.lookups < MAX_LOOKUPS;
+const unread = (sites: string[], skip: string[]) => sites.filter((site) => !coveredBy(site, skip)).slice(0, MAX_LOOKUP_SITES);
+
+/** Sites in a reply that Pip hasn't read. Once it knows the brand, sites its brief already lists are skipped too. */
+export function sitesToRead(words: string, research: Research, brief?: Brief): string[] {
+  const listed = research.known && brief ? ownDomains(brief) : [];
+  return unread(readSiteChanges(words).add, [...research.read, ...listed]);
+}
+
+const RIVALS = String.raw`(?:rivals?|competitors?|competition)`;
+const REJECTS_RIVALS = [
+  new RegExp(String.raw`\b(?:wrong|bad|incorrect|irrelevant|better|real|actual|different)\s+${RIVALS}\b`),
+  new RegExp(
+    String.raw`\b${RIVALS}\b[^.,;!?]{0,25}?\b(?:wrong|incorrect|irrelevant|rubbish|nonsense|not\s+(?:right|correct|relevant)|(?:are|look|seem)\s+(?:way\s+|totally\s+|a\s+bit\s+)?off|(?:aren'?t|are\s+not)\s+(?:right|correct|relevant)|(?:don'?t|do\s+not)\s+make\s+sense)\b`,
+  ),
+  new RegExp(String.raw`\b(?:aren'?t|are\s+not|not)\s+(?:its\s+|their\s+|the\s+)?(?:right\s+|real\s+|actual\s+)?${RIVALS}\b`),
+];
+
+/** "wrong rivals", "these aren't its competitors": the user turned down the rivals Pip suggested. */
+export function rejectsRivals(text: string): boolean {
+  const reply = text.toLowerCase().replace(/[’‘]/g, "'");
+  return REJECTS_RIVALS.some((pattern) => pattern.test(reply));
+}
+
+/**
+ * Whether to look up a brand Pip has just met: one it doesn't know (no `draft`, or a draft from the user's
+ * words), or one the user gave a site for that its draft doesn't list, which may mean a different brand.
+ */
+export function draftResearch(words: string, research: Research, draft?: { known: boolean; brief: Brief }): ResearchPlan | null {
+  if (!canResearch(research)) return null;
+  const known = draft?.known ?? false;
+  const sites = sitesToRead(words, { ...research, known }, draft?.brief);
+  if (known && !sites.length) return null;
+  return { why: known ? "site" : "unknown", sites, rejected: [] };
+}
+
+/**
+ * Whether a reply about the brief calls for a lookup: a site Pip hasn't read, or rivals the user turned down.
+ * On the website question and the plan, adding domains is expected, so a new site only counts for a brand Pip doesn't know.
+ */
+export function replyResearch(text: string, research: Research, brief: Brief, stage: BriefStage = "confirm"): ResearchPlan | null {
+  if (!canResearch(research)) return null;
+  const sites = stage === "confirm" || !research.known ? sitesToRead(text, research, brief) : [];
+  const rejected = rejectsRivals(text) ? [...brief.competitors] : [];
+  if (sites.length) return { why: "site", sites, rejected };
+  if (!rejectsRivals(text)) return null;
+  return { why: "rivals", sites: unread(ownDomains(brief), research.read), rejected };
+}
+
+export const researched = (research: Research, sites: string[], found: boolean): Research => ({
+  ...research,
+  known: research.known || found,
+  read: [...new Set([...research.read, ...sites])],
+  lookups: research.lookups + 1,
+});
+
+export function researchLine(name: string, { why, sites }: ResearchPlan): string {
+  const read = sites.length ? `read ${boldList(sites)} and ` : "";
+  if (why === "unknown") return `I don't know **${name}** yet, so let me ${read}look it up…`;
+  if (why === "site") return `Let me ${read}look **${name}** up, so the brief's right…`;
+  return `Let me ${read}look into who **${name}** really competes with…`;
+}
+
+/** Pip's line for a brief it looked up, used when the model's own message can't be. Next to the plan, there's no brief card to check. */
+export function researchedLine(brief: BriefDraft, { why }: ResearchPlan, stage: BriefStage = "confirm"): string {
+  const done =
+    why === "rivals" ? `I looked into who **${brief.product}** competes with and updated the rivals.` : `I looked **${brief.product}** up and updated the brief.`;
+  if (stage === "plan") return done;
+  if (why === "rivals") return `${done} Anything else to change, or does it look right?`;
+  return draftLine(brief, { known: true, web: true });
+}
+
+export const researchFailedLine = (name: string, { why }: ResearchPlan) =>
+  why === "rivals" ? `I couldn't find better rivals for **${name}** online just now.` : `I couldn't find more about **${name}** online just now.`;
 
 export const BRIEF_COPY = {
   rejected: "No problem. What should I change? You can fix anything, like “I meant the token” or “drop Solana, add Base”.",

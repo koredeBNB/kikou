@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeHtml, robotsDirectives } from "@/lib/audit/html";
+import { analyzeHtml, robotsDirectives, summarizePage } from "@/lib/audit/html";
 
 const PAGE = "https://thimble.studio/";
 
@@ -104,5 +104,47 @@ describe("robotsDirectives", () => {
   it("skips directives aimed at one named crawler", () => {
     expect(robotsDirectives("googlebot: noindex, otherbot: nofollow")).toEqual([]);
     expect(robotsDirectives(undefined)).toEqual([]);
+  });
+});
+
+describe("summarizePage", () => {
+  it("keeps what says what a site is: title, description, headings and the opening text", () => {
+    const summary = summarizePage(SERVER_RENDERED);
+    expect(summary).toEqual({
+      title: "Thimble – project tracker for design studios",
+      description: "Plan, track and ship client work.",
+      headings: ["Ship client work without the chaos"],
+      text: expect.stringContaining("Thimble keeps briefs, feedback and deadlines in one calm place."),
+    });
+    expect(summary.text).not.toMatch(/lots|fallback|color: red/);
+  });
+
+  it("falls back to the Open Graph description and leaves out navigation", () => {
+    const page = `<html><head><title>fomo | Social Crypto Trading App</title><meta property="og:description" content="Trade memecoins and copy top traders."></head>
+      <body><nav>Menu Blog Learn Login</nav><h1>where traders become legends</h1><h2>LEADERBOARD</h2><h2>FEED</h2><p>join 2,500,000 traders</p></body></html>`;
+    expect(summarizePage(page)).toEqual({
+      title: "fomo | Social Crypto Trading App",
+      description: "Trade memecoins and copy top traders.",
+      headings: ["where traders become legends", "LEADERBOARD", "FEED"],
+      text: "where traders become legends LEADERBOARD FEED join 2,500,000 traders",
+    });
+  });
+
+  it("lists a heading repeated for phones and desktops once", () => {
+    const page = `<html><body><h2>Trade from anywhere.</h2><h2>trade from anywhere.</h2><h2>Never miss out</h2></body></html>`;
+    expect(summarizePage(page).headings).toEqual(["Trade from anywhere.", "Never miss out"]);
+  });
+
+  it("caps the text at a word boundary and keeps at most eight headings", () => {
+    const page = `<html><body>${Array.from({ length: 12 }, (_, i) => `<h2>Section ${i}</h2>`).join("")}<p>${"calm ".repeat(600)}</p></body></html>`;
+    const summary = summarizePage(page, 200);
+    expect(summary.headings).toHaveLength(8);
+    expect(summary.text.length).toBeLessThanOrEqual(201);
+    expect(summary.text.endsWith("…")).toBe(true);
+    expect(summary.text).not.toMatch(/\bcal…$/);
+  });
+
+  it("copes with an empty document", () => {
+    expect(summarizePage("")).toEqual({ headings: [], text: "" });
   });
 });

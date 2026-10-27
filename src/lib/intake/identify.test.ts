@@ -65,16 +65,41 @@ describe("identifyBrand", () => {
 });
 
 describe("lookUpBrand", () => {
-  it("asks for three web results and checks the name against the user's words", async () => {
-    const { fetchImpl, bodies } = replying({ ...output, name: "Attio", category: "crm", websites: ["attio.com"] }, 0.008);
-    expect(await lookUpBrand({ reply: "Attio", earlier: [] }, { env, fetchImpl })).toMatchObject({ ok: true, costUsd: 0.008 });
-    expect(bodies[0].plugins).toEqual([{ id: "web", engine: "exa", max_results: 3 }]);
-    const renamed = replying({ ...output, name: "Attica" }, 0.008);
-    expect(await lookUpBrand({ reply: "Attio", earlier: [] }, { env, fetchImpl: renamed.fetchImpl })).toEqual({ ok: false, reason: "invalid", costUsd: 0.008 });
+  const fomo = { ...output, name: "fomo", description: "the social-first crypto trading app", category: "crypto trading app", websites: ["fomo.family"], competitors: ["Moonshot"], topics: [] };
+  const homepage = { site: "fomo.family", url: "https://fomo.family/", title: "fomo | Social Crypto Trading App", headings: [], text: "join 2,500,000 traders" };
+
+  it("reads the sites the user gave, searches for eight results with a short query, and says which sites it read", async () => {
+    const { fetchImpl, bodies } = replying(fomo, 0.012);
+    const sitesAsked: string[][] = [];
+    const readSites = async (sites: string[]) => {
+      sitesAsked.push(sites);
+      return [homepage];
+    };
+    const result = await lookUpBrand({ reply: "fomo the social trading app", earlier: [], name: "fomo", sites: ["fomo.family"] }, { env, fetchImpl, readSites });
+    expect(result).toEqual({ ok: true, output: fomo, costUsd: 0.012, read: ["fomo.family"] });
+    expect(sitesAsked).toEqual([["fomo.family"]]);
+    expect(bodies[0].plugins).toEqual([{ id: "web", engine: "exa", max_results: 8 }]);
+    const messages = bodies[0].messages as { role: string; content: string }[];
+    expect(messages.map((m) => m.role)).toEqual(["system", "user", "user"]);
+    expect(JSON.parse(messages[1].content).homepages).toEqual([{ site: "fomo.family", title: homepage.title, headings: [], text: homepage.text }]);
+    expect(messages[2].content).toBe("fomo (fomo.family): what it is and its main competitors");
   });
 
-  it("can't run without OpenRouter", async () => {
-    expect(await lookUpBrand({ reply: "Attio", earlier: [] }, { env: { OPENAI_API_KEY: "sk" } })).toEqual({ ok: false, reason: "no-model" });
+  it("checks the name against the user's words when no site was read", async () => {
+    const readSites = async () => [];
+    const { fetchImpl } = replying({ ...output, name: "Attio", category: "crm", websites: ["attio.com"] }, 0.008);
+    expect(await lookUpBrand({ reply: "Attio", earlier: [] }, { env, fetchImpl, readSites })).toMatchObject({ ok: true, costUsd: 0.008, read: [] });
+    const renamed = replying({ ...output, name: "Attica" }, 0.008);
+    expect(await lookUpBrand({ reply: "Attio", earlier: [] }, { env, fetchImpl: renamed.fetchImpl, readSites })).toEqual({ ok: false, reason: "invalid", costUsd: 0.008, read: [] });
+  });
+
+  it("doesn't read any site when it can't run", async () => {
+    const readSites = async (): Promise<never> => {
+      throw new Error("should not read");
+    };
+    const lookup = { reply: "fomo", earlier: [], sites: ["fomo.family"] };
+    expect(await lookUpBrand(lookup, { env: { OPENAI_API_KEY: "sk" }, readSites })).toEqual({ ok: false, reason: "no-model", read: [] });
+    expect(await lookUpBrand(lookup, { env: { ...env, SOV_INTAKE_RULES: "1" }, readSites })).toEqual({ ok: false, reason: "forced", read: [] });
   });
 });
 

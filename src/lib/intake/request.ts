@@ -1,11 +1,14 @@
 import {
   MAX_EARLIER,
+  MAX_LOOKUP_SITES,
   parseIdentified,
+  parseLookup,
   parseRevision,
   type BriefDraft,
   type BriefStage,
   type IdentifyInput,
   type Identified,
+  type LookupInput,
   type ReviseInput,
   type Revision,
 } from "@/lib/intake/brief";
@@ -13,7 +16,7 @@ import type { IntakeInput } from "@/lib/intake/prompt";
 import { rulesTurn } from "@/lib/intake/rules";
 import { parseIntakeTurn } from "@/lib/intake/schema";
 import { INTAKE_FIELDS, type FallbackReason, type IntakeField, type IntakeResult, type IntakeState } from "@/lib/intake/types";
-import { otherSitesOf } from "@/lib/sov/citations";
+import { cleanSites, otherSitesOf } from "@/lib/sov/citations";
 import { MAX_QUESTION_COUNT, MAX_TOPICS } from "@/lib/sov/intake";
 
 const MAX_REPLY = 1000;
@@ -85,9 +88,7 @@ export async function requestIntake(
   }
 }
 
-export type BriefRequest =
-  | ({ mode: "identify" | "lookup" } & IdentifyInput)
-  | ({ mode: "revise" } & ReviseInput);
+export type BriefRequest = ({ mode: "identify" } & IdentifyInput) | ({ mode: "lookup" } & LookupInput) | ({ mode: "revise" } & ReviseInput);
 
 const MODES = ["identify", "lookup", "revise"] as const;
 const STAGES: BriefStage[] = ["confirm", "sites", "plan"];
@@ -124,7 +125,17 @@ export function validateBriefRequest(input: unknown): { ok: true; value: BriefRe
   if (!reply) return { ok: false, error: "Empty reply." };
   if (mode !== "revise") {
     const earlier = Array.isArray(body.earlier) ? body.earlier.map((e) => str(e, MAX_REPLY)).filter(Boolean).slice(-MAX_EARLIER) : [];
-    return { ok: true, value: { mode, reply, earlier } };
+    if (mode === "identify") return { ok: true, value: { mode, reply, earlier } };
+    const value: BriefRequest = { mode, reply, earlier };
+    const name = str(body.name);
+    if (name) value.name = name;
+    const sites = Array.isArray(body.sites) ? cleanSites(body.sites.map((s) => (typeof s === "string" ? s.slice(0, MAX_VALUE) : undefined))).slice(0, MAX_LOOKUP_SITES) : [];
+    if (sites.length) value.sites = sites;
+    const brief = briefOf(body.brief);
+    if (brief) value.brief = brief;
+    const rejected = Array.isArray(body.rejected) ? body.rejected.map((r) => str(r)).filter(Boolean).slice(0, MAX_COMPETITORS) : [];
+    if (rejected.length) value.rejected = rejected;
+    return { ok: true, value };
   }
   const brief = briefOf(body.brief);
   if (!brief) return { ok: false, error: "Missing brief." };
@@ -132,13 +143,13 @@ export function validateBriefRequest(input: unknown): { ok: true; value: BriefRe
   return { ok: true, value: { mode, reply, brief, stage } };
 }
 
-/** Longer than the server's lookup timeout, so a slow search still gets the server's own answer. */
-export const LOOKUP_CLIENT_TIMEOUT_MS = 18_000;
+/** Longer than reading the sites plus the server's lookup timeout, so a slow search still gets the server's own answer. */
+export const LOOKUP_CLIENT_TIMEOUT_MS = 28_000;
 
 async function postBrief(
   body: BriefRequest,
   { fetchImpl = fetch, timeoutMs = CLIENT_TIMEOUT_MS }: { fetchImpl?: typeof fetch; timeoutMs?: number },
-): Promise<{ output: unknown; lookup: boolean } | null> {
+): Promise<{ output: unknown; lookup: boolean; read: string[] } | null> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
   try {
@@ -149,8 +160,9 @@ async function postBrief(
       signal: abort.signal,
     });
     if (!response.ok) return null;
-    const data = (await response.json()) as { source?: unknown; output?: unknown; lookup?: unknown };
-    return data.source === "ai" ? { output: data.output, lookup: data.lookup === true } : null;
+    const data = (await response.json()) as { source?: unknown; output?: unknown; lookup?: unknown; read?: unknown };
+    const read = Array.isArray(data.read) ? cleanSites(data.read.filter((s): s is string => typeof s === "string")) : [];
+    return data.source === "ai" ? { output: data.output, lookup: data.lookup === true, read } : null;
   } catch {
     return null;
   } finally {
@@ -169,9 +181,10 @@ export async function requestIdentify(input: IdentifyInput, options: RequestOpti
   return { identified: data ? parseIdentified(data.output, input) : null, lookup: data?.lookup ?? false };
 }
 
-export async function requestLookup(input: IdentifyInput, options: RequestOptions = {}): Promise<Identified | null> {
+/** Researches a brand Pip didn't know: its sites and the web. Null when the lookup found nothing usable. */
+export async function requestLookup(input: LookupInput, options: RequestOptions = {}): Promise<Identified | null> {
   const data = await postBrief({ mode: "lookup", ...input }, { timeoutMs: LOOKUP_CLIENT_TIMEOUT_MS, ...options });
-  return data ? parseIdentified(data.output, input, true) : null;
+  return data ? parseLookup(data.output, input, data.read) : null;
 }
 
 export async function requestRevision(input: ReviseInput, options: RequestOptions = {}): Promise<Revision | null> {

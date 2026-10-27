@@ -24,11 +24,14 @@ export interface IntakeCallOptions {
   onCost?: (usd: number) => void;
 }
 
-export type IntakeClient = (
-  setting: IntakeModelSetting,
-  prompt: { system: string; user: string },
-  options?: IntakeCallOptions,
-) => Promise<unknown>;
+/** `context`, when set, goes in a message of its own before `user`. */
+export interface ModelPrompt {
+  system: string;
+  user: string;
+  context?: string;
+}
+
+export type IntakeClient = (setting: IntakeModelSetting, prompt: ModelPrompt, options?: IntakeCallOptions) => Promise<unknown>;
 
 /** One structured-output task: the JSON schema to fill, and how much room and randomness it gets. */
 export interface StructuredSpec {
@@ -148,15 +151,11 @@ function toGeminiSchema(schema: Schema): Schema {
 export const callIntakeModel: IntakeClient = (setting, prompt, options = {}) => callStructuredModel(setting, prompt, INTAKE_SPEC, options);
 
 /** Asks the model for JSON matching `spec.schema`, returning the raw text or object it produced. */
-export async function callStructuredModel(
-  setting: IntakeModelSetting,
-  prompt: { system: string; user: string },
-  spec: StructuredSpec,
-  options: IntakeCallOptions = {},
-): Promise<unknown> {
+export async function callStructuredModel(setting: IntakeModelSetting, prompt: ModelPrompt, spec: StructuredSpec, options: IntakeCallOptions = {}): Promise<unknown> {
+  const user = prompt.context ? `${prompt.context}\n\n${prompt.user}` : prompt.user;
   const messages = [
     { role: "system", content: prompt.system },
-    { role: "user", content: prompt.user },
+    { role: "user", content: user },
   ];
   const { schema, maxTokens, temperature } = spec;
   const toolName = spec.toolName ?? spec.name;
@@ -168,7 +167,7 @@ export async function callStructuredModel(
       const headers = { authorization: `Bearer ${setting.apiKey}`, "x-title": BRAND_NAME };
       const body: Json = {
         model: setting.model,
-        messages,
+        messages: prompt.context ? [messages[0], { role: "user", content: prompt.context }, { role: "user", content: prompt.user }] : messages,
         response_format: responseFormat,
         provider: { require_parameters: true },
         temperature,
@@ -210,7 +209,7 @@ export async function callStructuredModel(
           max_tokens: maxTokens,
           temperature,
           system: prompt.system,
-          messages: [{ role: "user", content: prompt.user }],
+          messages: [{ role: "user", content: user }],
           tools: [{ name: toolName, description: "Record the structured result.", input_schema: schema }],
           tool_choice: { type: "tool", name: toolName },
         },
@@ -224,7 +223,7 @@ export async function callStructuredModel(
         { "x-goog-api-key": setting.apiKey },
         {
           systemInstruction: { parts: [{ text: prompt.system }] },
-          contents: [{ role: "user", parts: [{ text: prompt.user }] }],
+          contents: [{ role: "user", parts: [{ text: user }] }],
           generationConfig: {
             responseMimeType: "application/json",
             responseSchema: toGeminiSchema(schema),

@@ -147,6 +147,21 @@ describe("callIntakeModel", () => {
     expect(bodyOf(plain.calls[0]).plugins).toBeUndefined();
   });
 
+  it("sends context as its own message before the user's, so a web search only sees the last one", async () => {
+    const { impl, calls } = fakeFetch({ choices: [{ message: { content: "{}" } }] });
+    await callStructuredModel(setting({}), { ...prompt, context: '{"homepages":[]}' }, { name: "brand_brief", schema: {}, maxTokens: 700, temperature: 0, webResults: 8 }, { fetchImpl: impl });
+    expect(bodyOf(calls[0]).messages).toEqual([
+      { role: "system", content: prompt.system },
+      { role: "user", content: '{"homepages":[]}' },
+      { role: "user", content: prompt.user },
+    ]);
+
+    const direct = fakeFetch({ content: [{ type: "tool_use", name: "brand_brief", input: {} }] });
+    const anthropic = setting({ provider: "anthropic", apiKey: "ak", model: "claude-haiku-4-5", baseUrl: undefined });
+    await callStructuredModel(anthropic, { ...prompt, context: "ctx" }, { name: "brand_brief", schema: {}, maxTokens: 700, temperature: 0 }, { fetchImpl: direct.impl });
+    expect(bodyOf(direct.calls[0]).messages).toEqual([{ role: "user", content: `ctx\n\n${prompt.user}` }]);
+  });
+
   it("doesn't retry OpenRouter on other errors", async () => {
     const { impl, calls } = fakeFetch({ error: { message: "rate limited" } }, 429);
     await expect(callIntakeModel(setting({}), prompt, { fetchImpl: impl })).rejects.toThrow(/\(429\)/);

@@ -141,6 +141,42 @@ function shellReason(root: HTMLElement, words: number, noscript: string, scripts
   return undefined;
 }
 
+/** What a page says about itself, for a model working out what a brand is. */
+export interface PageSummary {
+  title?: string;
+  description?: string;
+  headings: string[];
+  text: string;
+}
+
+const MAX_HEADINGS = 8;
+const MAX_HEADING_CHARS = 120;
+
+function capText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${space > max * 0.6 ? cut.slice(0, space) : cut}…`;
+}
+
+export function summarizePage(html: string, maxChars = 1500): PageSummary {
+  const root = parse(html, { comment: false, blockTextElements: { script: true, noscript: true, style: true, pre: true } });
+  const metas = root.querySelectorAll("meta");
+  const meta = (attr: "name" | "property", key: string) => clean(metas.find((m) => m.getAttribute(attr)?.trim().toLowerCase() === key)?.getAttribute("content"));
+  const title = clean(root.querySelector("title")?.text) ?? meta("property", "og:title");
+  const description = meta("name", "description") ?? meta("property", "og:description");
+  for (const node of root.querySelectorAll(`${REMOVED}, nav`)) node.remove();
+  const headings: string[] = [];
+  for (const node of root.querySelectorAll("h1, h2")) {
+    const heading = clean(node.text)?.slice(0, MAX_HEADING_CHARS);
+    if (!heading || headings.some((other) => other.toLowerCase() === heading.toLowerCase())) continue;
+    headings.push(heading);
+    if (headings.length === MAX_HEADINGS) break;
+  }
+  const text = clean((root.querySelector("body") ?? root).structuredText) ?? "";
+  return { ...(title ? { title } : {}), ...(description ? { description } : {}), headings, text: capText(text, maxChars) };
+}
+
 export function analyzeHtml(html: string, pageUrl: string): HtmlFacts {
   const root = parse(html, { comment: false, blockTextElements: { script: true, noscript: true, style: true, pre: true } });
   const metas = root.querySelectorAll("meta");
