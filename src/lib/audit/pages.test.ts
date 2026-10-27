@@ -8,6 +8,11 @@ describe("pageKey", () => {
     expect(pageKey("https://www.thimble.studio/Pricing/?a=1#x")).toBe("thimble.studio/pricing");
     expect(pageKey("https://thimble.studio")).toBe("thimble.studio/");
   });
+
+  it("treats index files as their folder", () => {
+    expect(pageKey("https://thimble.studio/index.html")).toBe("thimble.studio/");
+    expect(pageKey("https://thimble.studio/docs/index.php")).toBe("thimble.studio/docs");
+  });
 });
 
 describe("pickPages", () => {
@@ -72,6 +77,16 @@ describe("pickPages", () => {
       candidates: ["a", "b", "c", "d", "e"].map((slug) => `${ORIGIN}/blog/${slug}`),
     });
     expect(picks.filter((p) => p.url.includes("/blog/"))).toHaveLength(3);
+  });
+
+  it("counts sections after a language prefix, so /en/ sites aren't one big section", () => {
+    const picks = pickPages({
+      origin: ORIGIN,
+      site: "thimble.studio",
+      cited: [],
+      candidates: [`${ORIGIN}/en/pricing`, `${ORIGIN}/en/features`, `${ORIGIN}/en/compare/a`, `${ORIGIN}/en/docs/start`, `${ORIGIN}/en/about`],
+    });
+    expect(picks).toHaveLength(6);
   });
 
   it("stops at the page limit", () => {

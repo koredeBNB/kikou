@@ -82,7 +82,10 @@ const bareHost = (host: string) => host.toLowerCase().replace(/^www\./, "");
 export function pageKey(url: string): string {
   try {
     const parsed = new URL(url);
-    const path = parsed.pathname.replace(/\/+$/, "").toLowerCase();
+    const path = parsed.pathname
+      .replace(/\/index\.(?:html?|php)$/i, "")
+      .replace(/\/+$/, "")
+      .toLowerCase();
     return `${bareHost(parsed.hostname)}${path || "/"}`;
   } catch {
     return url;
@@ -152,7 +155,8 @@ export function pickPages({
     if (picks.length >= max) return;
     const key = pageKey(url.toString());
     if (keys.has(key)) return;
-    const section = segments(url)[0] ?? "";
+    const parts = segments(url);
+    const section = (parts[0] && LOCALE.test(parts[0]) ? parts[1] : parts[0]) ?? "";
     if (capSections && section && (sections.get(section) ?? 0) >= MAX_PER_SECTION) return;
     keys.add(key);
     if (section) sections.set(section, (sections.get(section) ?? 0) + 1);

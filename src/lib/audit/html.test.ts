@@ -21,7 +21,7 @@ const SERVER_RENDERED = `<!doctype html>
   <style>.hero { color: red }</style>
 </head>
 <body>
-  <header><a href="/pricing">Pricing</a> <a href="/compare/quiltboard?ref=nav#top">Compare</a> <a href="https://elsewhere.com/x">Partner</a> <a href="/brochure.pdf">Brochure</a> <a href="mailto:hi@thimble.studio">Mail</a></header>
+  <header><a href="/pricing">Pricing</a> <a href="/compare/quiltboard?ref=nav#top">Compare</a> <a href="https://elsewhere.com/x">Partner</a> <a href="/brochure.pdf">Brochure</a> <a href="/index.md">Markdown</a> <a href="mailto:hi@thimble.studio">Mail</a></header>
   <h1>Ship client work without the chaos</h1>
   <p>Thimble keeps briefs, feedback and deadlines in one calm place.</p><p>Studios of two to twenty people use it daily.</p>
   <div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Thimble Pro</span></div>
@@ -42,7 +42,7 @@ describe("analyzeHtml", () => {
   });
 
   it("counts only the words a crawler sees, not scripts, styles or noscript fallbacks", () => {
-    expect(facts.words).toBe(32);
+    expect(facts.words).toBe(33);
     expect(facts.appShell).toBeUndefined();
   });
 
